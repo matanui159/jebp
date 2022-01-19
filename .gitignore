@@ -1,0 +1,13 @@
+# Build files
+*.o
+/jebpview
+
+# IDE files
+/.vscode/
+
+# Mac files
+.DS_Store
+*.dSYM/
+
+# Test files (ignored for now)
+/test/
