@@ -4,28 +4,29 @@
 #include <stdio.h>
 #include <SDL.h>
 
+static void jebpview_error(jebp_error_t error) {
+    fprintf(stderr, "%s\n", jebp_error_string(error));
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char **argv) {
-    jebp_error_t err;
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <WebP file>\n", argv[0]);
         return EXIT_FAILURE;
     }
 
-    jebp_image_t image = { .rgba = NULL };
-    if ((err = jebp_read_size(&image, argv[1])) != JEBP_OK) {
-        goto error;
+    jebp_image_t image;
+    jebp_error_t err = jebp_read_size(&image, argv[1]);
+    if (err != JEBP_OK) {
+        jebpview_error(err);
     }
     printf("WebP image size: %ix%i\n", image.width, image.height);
 
-    if ((err = jebp_read(&image, argv[1])) != JEBP_OK) {
-        goto error;
+    err = jebp_read(&image, argv[1]);
+    if (err != JEBP_OK) {
+        jebpview_error(err);
     }
 
-error:
-    jebp_image_free(&image);
-    if (err != JEBP_OK) {
-        fprintf(stderr, "%s\n", jebp_error(err));
-        return EXIT_FAILURE;
-    }
+    jebp_free_image(&image);
     return EXIT_SUCCESS;
 }

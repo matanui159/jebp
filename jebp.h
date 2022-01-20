@@ -263,8 +263,8 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #endif
 
 #ifdef JEBP_NO_SIMD
-#undef JEBP_SIMD_SSE2
-#undef JEBP_SIMD_NEON
+#undef JEBP__SIMD_SSE2
+#undef JEBP__SIMD_NEON
 #endif // JEBP_NO_SIMD
 #ifdef JEBP__SIMD_SSE2
 #include <emmintrin.h>
@@ -359,7 +359,10 @@ typedef struct jebp__context_t {
  */
 static JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx, jebp_error_t error, const char *file, jebp_int line) {
 #ifdef JEBP_LOG_ERRORS
-    fprintf(stderr, "%s:%i: %s\n", jebp_error_string(error));
+    fprintf(stderr, "%s:%i: %s\n", file, line, jebp_error_string(error));
+#else // JEBP_LOG_ERRORS
+    (void)file;
+    (void)line;
 #endif // JEBP_LOG_ERRORS
 #ifdef JEBP_ERROR
     JEBP_ERROR(error);
@@ -384,14 +387,8 @@ static JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx, jebp_e
 #define JEBP__MAX(a, b) ((a) > (b) ? (a) : (b))
 #define JEBP__CEIL_SHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
 
-// TODO: maybe this can be a jebp_int?
-//       or it might be better to have a jebp__image_end function?
-static size_t jebp__image_size(const jebp_image_t *image) {
-    return (size_t)image->width * (size_t)image->height;
-}
-
 static void jebp__alloc_image(jebp__context_t *ctx, jebp_image_t *image) {
-    image->pixels = JEBP_ALLOC(jebp__image_size(image) * sizeof(jebp_color_t));
+    image->pixels = JEBP_ALLOC((size_t)image->width * (size_t)image->height * sizeof(jebp_color_t));
     if (image->pixels == NULL) {
         JEBP__ERROR(NOMEM);
     }
@@ -404,6 +401,7 @@ static void jebp__free_context(jebp__context_t *ctx) {
     }
     JEBP_FREE(ctx->buffer);
 #endif // JEBP_NO_STDIO
+#ifndef JEBP_NO_VP8L
     JEBP_FREE(ctx->colcache);
     JEBP_FREE(ctx->lengths);
     for (jebp_int i = 0; i < ctx->nb_trees; i += 1) {
@@ -414,6 +412,7 @@ static void jebp__free_context(jebp__context_t *ctx) {
         JEBP_FREE(ctx->transforms[i].image.pixels);
     }
     JEBP_FREE(ctx->huffman_image.pixels);
+#endif // JEBP_NO_VP8L
 }
 
 /**
@@ -429,8 +428,8 @@ static void jebp__check_buffer(jebp__context_t *ctx) {
             JEBP__ERROR(EOF);
 #ifndef JEBP_NO_STDIO
         }
+        ctx->nb_bytes = fread(ctx->buffer, 1, JEBP__BUFFER_SIZE, ctx->file);
         ctx->bytes = ctx->buffer;
-        ctx->nb_bytes = fread(ctx->bytes, 1, JEBP__BUFFER_SIZE, ctx->file);
         if (ferror(ctx->file)) {
             JEBP__ERROR(IO);
         }
@@ -468,8 +467,6 @@ static void jebp__read_bytes(jebp__context_t *ctx, size_t size, void *data) {
     }
 }
 
-// Bit-reading is currently only used by VP8L
-#ifndef JEBP_NO_VP8L
 static jebp_ubyte jebp__read_uint8(jebp__context_t *ctx) {
     ctx->nb_bits = 0;
     jebp__check_chunk(ctx, &ctx->webp_chunk, 1);
@@ -484,7 +481,7 @@ static jebp_int jebp__read_bits(jebp__context_t *ctx, jebp_int size) {
     jebp_int shift = 0;
     while (size > 0) {
         if (ctx->nb_bits == 0) {
-            ctx->bits = jebp__read_1byte(ctx);
+            ctx->bits = jebp__read_uint8(ctx);
             ctx->nb_bits = 8;
         }
         jebp_int nb_bits = JEBP__MIN(size, ctx->nb_bits);
@@ -496,7 +493,6 @@ static jebp_int jebp__read_bits(jebp__context_t *ctx, jebp_int size) {
     }
     return bits;
 }
-#endif // JEBP_NO_VP8L
 
 /**
  * RIFF container
@@ -538,6 +534,7 @@ static void jebp__read_header(jebp__context_t *ctx) {
  * Huffman coding
  */
 #ifndef JEBP_NO_VP8L
+#define JEBP__NB_META_SYMBOLS 19
 #define JEBP__NB_COLOR_SYMBOLS 256
 #define JEBP__NB_LENGTH_SYMBOLS 24
 #define JEBP__NB_DIST_SYMBOLS 40
@@ -552,7 +549,7 @@ typedef enum jebp__huffman_type_t {
     JEBP__NB_HUFFMAN_TYPES
 } jebp__huffman_type_t;
 
-static const jebp_int jebp__meta_length_order[] = {
+static const jebp_int jebp__meta_length_order[JEBP__NB_META_SYMBOLS] = {
     17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 };
 
@@ -570,7 +567,7 @@ static void jebp__build_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jeb
     table->max_code = 0;
     if (nb_lengths > tree->nb_values) {
         JEBP_FREE(table->values);
-        table->values = JEBP_ALLOC(nb_lengths * sizeof(jebp_int));
+        table->values = JEBP_ALLOC((size_t)nb_lengths * sizeof(jebp_int));
         if (table->values == NULL) {
             JEBP__ERROR(NOMEM);
         }
@@ -587,7 +584,7 @@ static void jebp__build_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jeb
         table->max_code = table->min_code;
         table->values = values;
         for (jebp_int j = 0; j < nb_lengths; j += 1) {
-            if (ctx->lengths[j] == i + 1) {
+            if (ctx->lengths[j] == i) {
                 *(values++) = j;
                 table->max_code += 1;
                 nb_used += 1;
@@ -597,9 +594,7 @@ static void jebp__build_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jeb
     if (nb_used <= 1) {
         // Special case: if there is only one value, it will have length 0
         tree->tables[0].max_code = nb_used;
-        return;
     }
-    return JEBP_OK;
 }
 
 static jebp_int jebp__read_symbol(jebp__context_t *ctx, jebp__huffman_t *tree) {
@@ -645,7 +640,7 @@ static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jebp
         for (jebp_int i = 0; i < nb_meta_lengths; i += 1) {
             ctx->lengths[jebp__meta_length_order[i]] = jebp__read_bits(ctx, 3);
         }
-        jebp__build_huffman(ctx, tree, nb_meta_lengths);
+        jebp__build_huffman(ctx, tree, JEBP__NB_META_SYMBOLS);
         jebp_int nb_symbols = nb_lengths;
         if (jebp__read_bits(ctx, 1)) {
             // limit codes
@@ -654,7 +649,7 @@ static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jebp
         }
 
         jebp_int prev_length = 8;
-        for (size_t i = 0; i < nb_lengths && nb_symbols > 0; nb_symbols -= 1) {
+        for (jebp_int i = 0; i < nb_lengths && nb_symbols > 0; nb_symbols -= 1) {
             jebp_int symbol = jebp__read_symbol(ctx, tree);
             jebp_int length;
             jebp_int repeat;
@@ -716,7 +711,7 @@ static jebp_int jebp__read_colcache(jebp__context_t *ctx) {
     }
 }
 
-static uint32_t jebp__read_vp8l_extrabits(jebp__context_t *ctx, jebp_int symbol) {
+static jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx, jebp_int symbol) {
     if (symbol < 4) {
         return symbol + 1;
     }
@@ -739,7 +734,7 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image) {
     }
 
     for (jebp_int i = 0; i < nb_trees; i += 1) {
-        jebp__huffman_type_t type = i % JEBP__NB_HUFFMAN_TYPES;
+        jebp__huffman_type_t type = (jebp__huffman_type_t)(i % JEBP__NB_HUFFMAN_TYPES);
         jebp_int nb_lengths = jebp__type_nb_lengths[type];
         // TODO: add colcache lengths
         jebp__read_huffman(ctx, &ctx->trees[i], nb_lengths);
@@ -781,8 +776,8 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image) {
 
 static void jebp__read_vp8l_subimage(jebp__context_t *ctx, jebp__subimage_t *image) {
     image->block_bits = jebp__read_bits(ctx, 3) + 2;
-    image->width = JEBP__CEIL_SHIFT(image->width, image->block_bits);
-    image->height = JEBP__CEIL_SHIFT(image->height, image->block_bits);
+    image->width = JEBP__CEIL_SHIFT(ctx->image->width, image->block_bits);
+    image->height = JEBP__CEIL_SHIFT(ctx->image->height, image->block_bits);
     jebp__read_colcache(ctx);
     jebp__read_vp8l_image(ctx, (jebp_image_t *)image);
 }
@@ -840,11 +835,11 @@ static void jebp__read_vp8l_nohead(jebp__context_t *ctx) {
     }
     if (cont) {
         // If we attempt to read a 5th transform this will fail
-        jebp__transform_read(ctx, NULL);
+        jebp__read_transform(ctx, NULL);
     }
 }
 
-static jebp_error_t jebp__read_vp8l(jebp__context_t *ctx) {
+static void jebp__read_vp8l(jebp__context_t *ctx) {
     jebp__read_vp8l_header(ctx);
     jebp__read_vp8l_nohead(ctx);
 }
@@ -889,6 +884,7 @@ static jebp_error_t jebp__read_size(jebp__context_t *ctx) {
 #ifndef JEBP_ERROR
     if (setjmp(ctx->jump)) {
         jebp__free_context(ctx);
+        jebp_free_image(ctx->image);
         return ctx->error;
     }
 #endif // JEBP_ERROR
@@ -919,6 +915,7 @@ static jebp_error_t jebp__read(jebp__context_t *ctx) {
 #ifndef JEBP_ERROR
     if (setjmp(ctx->jump)) {
         jebp__free_context(ctx);
+        jebp_free_image(ctx->image);
         return ctx->error;
     }
 #endif // JEBP_ERROR
