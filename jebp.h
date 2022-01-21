@@ -147,7 +147,7 @@ extern "C" {
 
 typedef signed char jebp_byte;
 typedef unsigned char jebp_ubyte;
-#if UINT_MAX >= 0xffffffffUL
+#if UINT_MAX >= 0xffffffff
 typedef int jebp_int;
 typedef unsigned int jebp_uint;
 #else
@@ -282,7 +282,7 @@ typedef struct jebp__chunk_t {
 } jebp__chunk_t;
 
 #ifndef JEBP_NO_VP8L
-#define JEBP__NB_HUFFMAN_LENGTHS 15
+#define JEBP__NB_HUFFMAN_LENGTHS 16
 
 // A nice property about canonical huffman codes is that all codes of the same
 // length are increments of the previous code, meaning we can create a table
@@ -300,6 +300,14 @@ typedef struct jebp__huffman_t {
     jebp_int nb_values;
     jebp__huffman_table_t tables[JEBP__NB_HUFFMAN_LENGTHS];
 } jebp__huffman_t;
+
+typedef struct jebp__huffman_group_t {
+    jebp__huffman_t main;
+    jebp__huffman_t red;
+    jebp__huffman_t blue;
+    jebp__huffman_t alpha;
+    jebp__huffman_t dist;
+} jebp__huffman_group_t;
 
 typedef struct jebp__subimage_t {
     jebp_int width;
@@ -347,8 +355,8 @@ typedef struct jebp__context_t {
     jebp_color_t *colcache;
     jebp_int nb_lengths;
     jebp_int *lengths;
-    jebp_int nb_trees;
-    jebp__huffman_t *trees;
+    jebp_int nb_groups;
+    jebp__huffman_group_t *groups;
     jebp__transform_t transforms[JEBP__NB_TRANSFORMS];
     jebp__subimage_t huffman_image;
 #endif // JEBP_NO_VP8L
@@ -404,10 +412,15 @@ static void jebp__free_context(jebp__context_t *ctx) {
 #ifndef JEBP_NO_VP8L
     JEBP_FREE(ctx->colcache);
     JEBP_FREE(ctx->lengths);
-    for (jebp_int i = 0; i < ctx->nb_trees; i += 1) {
-        JEBP_FREE(ctx->trees[i].tables[0].values);
+    for (jebp_int i = 0; i < ctx->nb_groups; i += 1) {
+        jebp__huffman_group_t *group = &ctx->groups[i];
+        JEBP_FREE(group->main.tables->values);
+        JEBP_FREE(group->red.tables->values);
+        JEBP_FREE(group->blue.tables->values);
+        JEBP_FREE(group->alpha.tables->values);
+        JEBP_FREE(group->dist.tables->values);
     }
-    JEBP_FREE(ctx->trees);
+    JEBP_FREE(ctx->groups);
     for (jebp_int i = 0; i < 4; i += 1) {
         JEBP_FREE(ctx->transforms[i].image.pixels);
     }
@@ -497,8 +510,8 @@ static jebp_int jebp__read_bits(jebp__context_t *ctx, jebp_int size) {
 /**
  * RIFF container
  */
-#define JEBP__RIFF_TAG 0x46464952L
-#define JEBP__WEBP_TAG 0x50424557L
+#define JEBP__RIFF_TAG 0x46464952
+#define JEBP__WEBP_TAG 0x50424557
 
 static jebp_uint jebp__read_uint32(jebp__context_t *ctx) {
 #ifdef JEBP__LITTLE_ENDIAN
@@ -540,38 +553,21 @@ static void jebp__read_header(jebp__context_t *ctx) {
 #define JEBP__NB_DIST_SYMBOLS 40
 #define JEBP__NB_MAIN_SYMBOLS (JEBP__NB_COLOR_SYMBOLS + JEBP__NB_LENGTH_SYMBOLS)
 
-typedef enum jebp__huffman_type_t {
-    JEBP__HUFFMAN_MAIN,
-    JEBP__HUFFMAN_RED,
-    JEBP__HUFFMAN_BLUE,
-    JEBP__HUFFMAN_ALPHA,
-    JEBP__HUFFMAN_DIST,
-    JEBP__NB_HUFFMAN_TYPES
-} jebp__huffman_type_t;
-
 static const jebp_int jebp__meta_length_order[JEBP__NB_META_SYMBOLS] = {
     17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 };
 
-static const jebp_int jebp__type_nb_lengths[JEBP__NB_HUFFMAN_TYPES] = {
-    JEBP__NB_MAIN_SYMBOLS,
-    JEBP__NB_COLOR_SYMBOLS,
-    JEBP__NB_COLOR_SYMBOLS,
-    JEBP__NB_COLOR_SYMBOLS,
-    JEBP__NB_DIST_SYMBOLS
-};
-
-static void jebp__build_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jebp_int nb_lengths) {
-    jebp__huffman_table_t *table = tree->tables;
+static void jebp__build_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman, jebp_int nb_lengths) {
+    jebp__huffman_table_t *table = huffman->tables;
     table->min_code = 0;
     table->max_code = 0;
-    if (nb_lengths > tree->nb_values) {
+    if (nb_lengths > huffman->nb_values) {
         JEBP_FREE(table->values);
         table->values = JEBP_ALLOC((size_t)nb_lengths * sizeof(jebp_int));
         if (table->values == NULL) {
             JEBP__ERROR(NOMEM);
         }
-        tree->nb_values = nb_lengths;
+        huffman->nb_values = nb_lengths;
     }
 
     // TODO: do we have to check for invalid huffman trees?
@@ -593,12 +589,12 @@ static void jebp__build_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jeb
     }
     if (nb_used <= 1) {
         // Special case: if there is only one value, it will have length 0
-        tree->tables[0].max_code = nb_used;
+        huffman->tables[0].max_code = nb_used;
     }
 }
 
-static jebp_int jebp__read_symbol(jebp__context_t *ctx, jebp__huffman_t *tree) {
-    jebp__huffman_table_t *table = tree->tables;
+static jebp_int jebp__read_symbol(jebp__context_t *ctx, jebp__huffman_t *huffman) {
+    jebp__huffman_table_t *table = huffman->tables;
     if (table->max_code > 0) {
         return table->values[0];
     }
@@ -613,7 +609,7 @@ static jebp_int jebp__read_symbol(jebp__context_t *ctx, jebp__huffman_t *tree) {
     JEBP__ERROR(INVDATA);
 }
 
-static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jebp_int nb_lengths) {
+static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman, jebp_int nb_lengths) {
     // This part of the spec is INCREDIBLY wrong and partly missing
     // Using libwebp as a reference
     size_t lengths_size = (size_t)nb_lengths * sizeof(jebp_int);
@@ -640,7 +636,7 @@ static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jebp
         for (jebp_int i = 0; i < nb_meta_lengths; i += 1) {
             ctx->lengths[jebp__meta_length_order[i]] = jebp__read_bits(ctx, 3);
         }
-        jebp__build_huffman(ctx, tree, JEBP__NB_META_SYMBOLS);
+        jebp__build_huffman(ctx, huffman, JEBP__NB_META_SYMBOLS);
         jebp_int nb_symbols = nb_lengths;
         if (jebp__read_bits(ctx, 1)) {
             // limit codes
@@ -650,7 +646,7 @@ static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jebp
 
         jebp_int prev_length = 8;
         for (jebp_int i = 0; i < nb_lengths && nb_symbols > 0; nb_symbols -= 1) {
-            jebp_int symbol = jebp__read_symbol(ctx, tree);
+            jebp_int symbol = jebp__read_symbol(ctx, huffman);
             jebp_int length;
             jebp_int repeat;
             switch (symbol) {
@@ -676,7 +672,7 @@ static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *tree, jebp
             }
         }
     }
-    jebp__build_huffman(ctx, tree, nb_lengths);
+    jebp__build_huffman(ctx, huffman, nb_lengths);
 }
 
 /**
@@ -721,40 +717,43 @@ static jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx, jebp_int symbol)
 }
 
 static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image) {
-    jebp_int nb_trees = JEBP__NB_HUFFMAN_TYPES;
-    if (nb_trees > ctx->nb_trees) {
-        JEBP_FREE(ctx->trees);
-        size_t trees_size = (size_t)nb_trees * sizeof(jebp__huffman_t);
-        ctx->trees = JEBP_ALLOC(trees_size);
-        if (ctx->trees == NULL) {
+    jebp_int nb_groups = 1;
+    if (nb_groups > ctx->nb_groups) {
+        JEBP_FREE(ctx->groups);
+        size_t groups_size = (size_t)nb_groups * sizeof(jebp__huffman_t);
+        ctx->groups = JEBP_ALLOC(groups_size);
+        if (ctx->groups == NULL) {
             JEBP__ERROR(NOMEM);
         }
-        JEBP__CLEAR(ctx->trees, trees_size);
-        ctx->nb_trees = nb_trees;
+        JEBP__CLEAR(ctx->groups, groups_size);
+        ctx->nb_groups = nb_groups;
     }
 
-    for (jebp_int i = 0; i < nb_trees; i += 1) {
-        jebp__huffman_type_t type = (jebp__huffman_type_t)(i % JEBP__NB_HUFFMAN_TYPES);
-        jebp_int nb_lengths = jebp__type_nb_lengths[type];
-        // TODO: add colcache lengths
-        jebp__read_huffman(ctx, &ctx->trees[i], nb_lengths);
+    for (jebp_int i = 0; i < nb_groups; i += 1) {
+        jebp__huffman_group_t *group = &ctx->groups[i];
+        // TODO: add colcache symbols
+        jebp__read_huffman(ctx, &group->main, JEBP__NB_MAIN_SYMBOLS);
+        jebp__read_huffman(ctx, &group->red, JEBP__NB_COLOR_SYMBOLS);
+        jebp__read_huffman(ctx, &group->blue, JEBP__NB_COLOR_SYMBOLS);
+        jebp__read_huffman(ctx, &group->alpha, JEBP__NB_COLOR_SYMBOLS);
+        jebp__read_huffman(ctx, &group->dist, JEBP__NB_DIST_SYMBOLS);
     }
 
     jebp__alloc_image(ctx, image);
     jebp_color_t *pixel = image->pixels;
     jebp_color_t *end = pixel + image->width * image->height;
     while (pixel != end) {
-        jebp__huffman_t *group = ctx->trees;
-        jebp_int main = jebp__read_symbol(ctx, &group[JEBP__HUFFMAN_MAIN]);
+        jebp__huffman_group_t *group = ctx->groups;
+        jebp_int main = jebp__read_symbol(ctx, &group->main);
         if (main < JEBP__NB_COLOR_SYMBOLS) {
             pixel->g = (jebp_ubyte)main;
-            pixel->r = (jebp_ubyte)jebp__read_symbol(ctx, &group[JEBP__HUFFMAN_RED]);
-            pixel->b = (jebp_ubyte)jebp__read_symbol(ctx, &group[JEBP__HUFFMAN_BLUE]);
-            pixel->a = (jebp_ubyte)jebp__read_symbol(ctx, &group[JEBP__HUFFMAN_ALPHA]);
+            pixel->r = (jebp_ubyte)jebp__read_symbol(ctx, &group->red);
+            pixel->b = (jebp_ubyte)jebp__read_symbol(ctx, &group->blue);
+            pixel->a = (jebp_ubyte)jebp__read_symbol(ctx, &group->alpha);
             pixel += 1;
         } else if (main < JEBP__NB_MAIN_SYMBOLS) {
             jebp_int length = jebp__read_vp8l_extrabits(ctx, main - JEBP__NB_COLOR_SYMBOLS);
-            jebp_int dist = jebp__read_symbol(ctx, &group[JEBP__HUFFMAN_DIST]);
+            jebp_int dist = jebp__read_symbol(ctx, &group->dist);
             dist = jebp__read_vp8l_extrabits(ctx, dist);
             if (dist > JEBP__NB_VP8L_OFFSETS) {
                 dist -= JEBP__NB_VP8L_OFFSETS;
@@ -808,7 +807,7 @@ static jebp_int jebp__read_transform(jebp__context_t *ctx, jebp__transform_t *tr
 /**
  * VP8L lossless codec
  */
-#define JEBP__VP8L_TAG 0x4c385056L
+#define JEBP__VP8L_TAG 0x4c385056
 #define JEBP__VP8L_MAGIC 0x2f
 
 static void jebp__read_vp8l_header(jebp__context_t *ctx) {
