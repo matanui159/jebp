@@ -700,8 +700,7 @@ static jebp_int jebp__read_colcache(jebp__context_t *ctx) {
         if (colcache_bits < 1 || colcache_bits > 11) {
             JEBP__ERROR(INVDATA);
         }
-        JEBP__ERROR(NOSUP);
-        // return colcache_bits;
+        return colcache_bits;
     } else {
         return 0;
     }
@@ -716,7 +715,19 @@ static jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx, jebp_int symbol)
     return symbol + jebp__read_bits(ctx, extrabits);
 }
 
-static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image) {
+static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jebp_int colcache_bits) {
+    jebp_int nb_colcache_symbols = 1 << colcache_bits;
+    size_t colcache_size = (size_t)nb_colcache_symbols * sizeof(jebp_color_t);
+    if (colcache_bits > ctx->colcache_bits) {
+        JEBP_FREE(ctx->colcache);
+        ctx->colcache = JEBP_ALLOC(colcache_size);
+        if (ctx->colcache == NULL) {
+            JEBP__ERROR(NOMEM);
+        }
+        JEBP__CLEAR(ctx->colcache, colcache_size);
+        ctx->colcache_bits = colcache_bits;
+    }
+
     jebp_int nb_groups = 1;
     if (nb_groups > ctx->nb_groups) {
         JEBP_FREE(ctx->groups);
@@ -731,8 +742,7 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image) {
 
     for (jebp_int i = 0; i < nb_groups; i += 1) {
         jebp__huffman_group_t *group = &ctx->groups[i];
-        // TODO: add colcache symbols
-        jebp__read_huffman(ctx, &group->main, JEBP__NB_MAIN_SYMBOLS);
+        jebp__read_huffman(ctx, &group->main, JEBP__NB_MAIN_SYMBOLS + nb_colcache_symbols);
         jebp__read_huffman(ctx, &group->red, JEBP__NB_COLOR_SYMBOLS);
         jebp__read_huffman(ctx, &group->blue, JEBP__NB_COLOR_SYMBOLS);
         jebp__read_huffman(ctx, &group->alpha, JEBP__NB_COLOR_SYMBOLS);
@@ -777,8 +787,8 @@ static void jebp__read_vp8l_subimage(jebp__context_t *ctx, jebp__subimage_t *ima
     image->block_bits = jebp__read_bits(ctx, 3) + 2;
     image->width = JEBP__CEIL_SHIFT(ctx->image->width, image->block_bits);
     image->height = JEBP__CEIL_SHIFT(ctx->image->height, image->block_bits);
-    jebp__read_colcache(ctx);
-    jebp__read_vp8l_image(ctx, (jebp_image_t *)image);
+    jebp_int colcache_bits = jebp__read_colcache(ctx);
+    jebp__read_vp8l_image(ctx, (jebp_image_t *)image, colcache_bits);
 }
 
 /**
@@ -836,6 +846,7 @@ static void jebp__read_vp8l_nohead(jebp__context_t *ctx) {
         // If we attempt to read a 5th transform this will fail
         jebp__read_transform(ctx, NULL);
     }
+    jebp__read_colcache(ctx);
 }
 
 static void jebp__read_vp8l(jebp__context_t *ctx) {
