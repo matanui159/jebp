@@ -394,6 +394,11 @@ static JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx, jebp_e
 #define JEBP__MIN(a, b) ((a) < (b) ? (a) : (b))
 #define JEBP__MAX(a, b) ((a) > (b) ? (a) : (b))
 #define JEBP__CEIL_SHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
+#define JEBP__LOOP_IMAGE(image) for (\
+    jebp_color_t *pixel = (image)->pixels, \
+    *end = pixel + (image)->width * (image)->height; \
+    pixel != end; \
+)
 
 static void jebp__alloc_image(jebp__context_t *ctx, jebp_image_t *image) {
     image->pixels = JEBP_ALLOC((size_t)image->width * (size_t)image->height * sizeof(jebp_color_t));
@@ -715,8 +720,16 @@ static jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx, jebp_int symbol)
     return symbol + jebp__read_bits(ctx, extrabits);
 }
 
-static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jebp_int colcache_bits) {
-    jebp_int nb_colcache_symbols = 1 << colcache_bits;
+static JEBP__INLINE jebp_color_t jebp__index_subimage(jebp_image_t *image, jebp_color_t *pixel, jebp__subimage_t *subimage) {
+    jebp_int i = (jebp_int)(pixel - image->pixels);
+    jebp_int x = i % image->width;
+    jebp_int y = i / image->height;
+    jebp_int j = (y >> subimage->block_bits) * subimage->width + (x >> subimage->block_bits);
+    return subimage->pixels[j];
+}
+
+static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jebp_int colcache_bits, jebp__subimage_t *huffman_image) {
+    jebp_int nb_colcache_symbols = colcache_bits == 0 ? 0 : 1 << colcache_bits;
     size_t colcache_size = (size_t)nb_colcache_symbols * sizeof(jebp_color_t);
     if (colcache_bits > ctx->colcache_bits) {
         JEBP_FREE(ctx->colcache);
@@ -724,14 +737,26 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
         if (ctx->colcache == NULL) {
             JEBP__ERROR(NOMEM);
         }
-        JEBP__CLEAR(ctx->colcache, colcache_size);
         ctx->colcache_bits = colcache_bits;
     }
+    JEBP__CLEAR(ctx->colcache, colcache_size);
 
     jebp_int nb_groups = 1;
+    if (huffman_image != NULL) {
+        JEBP__LOOP_IMAGE(huffman_image) {
+            if (pixel->r != 0) {
+                // Currently only 256 huffman groups are supported
+                JEBP__ERROR(NOSUP);
+            }
+            if (pixel->g >= nb_groups) {
+                nb_groups = pixel->g;
+            }
+            pixel += 1;
+        }
+    }
     if (nb_groups > ctx->nb_groups) {
         JEBP_FREE(ctx->groups);
-        size_t groups_size = (size_t)nb_groups * sizeof(jebp__huffman_t);
+        size_t groups_size = (size_t)nb_groups * sizeof(jebp__huffman_group_t);
         ctx->groups = JEBP_ALLOC(groups_size);
         if (ctx->groups == NULL) {
             JEBP__ERROR(NOMEM);
@@ -739,7 +764,6 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
         JEBP__CLEAR(ctx->groups, groups_size);
         ctx->nb_groups = nb_groups;
     }
-
     for (jebp_int i = 0; i < nb_groups; i += 1) {
         jebp__huffman_group_t *group = &ctx->groups[i];
         jebp__read_huffman(ctx, &group->main, JEBP__NB_MAIN_SYMBOLS + nb_colcache_symbols);
@@ -750,10 +774,12 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
     }
 
     jebp__alloc_image(ctx, image);
-    jebp_color_t *pixel = image->pixels;
-    jebp_color_t *end = pixel + image->width * image->height;
-    while (pixel != end) {
+    JEBP__LOOP_IMAGE(image) {
         jebp__huffman_group_t *group = ctx->groups;
+        if (huffman_image != NULL) {
+            jebp_int index = jebp__index_subimage(image, pixel, huffman_image).g;
+            group = &ctx->groups[index];
+        }
         jebp_int main = jebp__read_symbol(ctx, &group->main);
         if (main < JEBP__NB_COLOR_SYMBOLS) {
             pixel->g = (jebp_ubyte)main;
@@ -783,12 +809,12 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
     }
 }
 
-static void jebp__read_vp8l_subimage(jebp__context_t *ctx, jebp__subimage_t *image) {
+static void jebp__read_subimage(jebp__context_t *ctx, jebp__subimage_t *image) {
     image->block_bits = jebp__read_bits(ctx, 3) + 2;
     image->width = JEBP__CEIL_SHIFT(ctx->image->width, image->block_bits);
     image->height = JEBP__CEIL_SHIFT(ctx->image->height, image->block_bits);
     jebp_int colcache_bits = jebp__read_colcache(ctx);
-    jebp__read_vp8l_image(ctx, (jebp_image_t *)image, colcache_bits);
+    jebp__read_vp8l_image(ctx, (jebp_image_t *)image, colcache_bits, NULL);
 }
 
 /**
@@ -809,7 +835,7 @@ static jebp_int jebp__read_transform(jebp__context_t *ctx, jebp__transform_t *tr
         // TODO: support palette images
         JEBP__ERROR(NOSUP);
     } else if (transform->type != JEBP__TRANSFORM_GREEN) {
-        jebp__read_vp8l_subimage(ctx, &transform->image);
+        jebp__read_subimage(ctx, &transform->image);
     }
     return 1;
 }
@@ -846,7 +872,15 @@ static void jebp__read_vp8l_nohead(jebp__context_t *ctx) {
         // If we attempt to read a 5th transform this will fail
         jebp__read_transform(ctx, NULL);
     }
-    jebp__read_colcache(ctx);
+
+    jebp_int colcache_bits = jebp__read_colcache(ctx);
+    jebp__subimage_t *huffman_image = NULL;
+    if (jebp__read_bits(ctx, 1)) {
+        // there is a huffman image
+        huffman_image = &ctx->huffman_image;
+        jebp__read_subimage(ctx, huffman_image);
+    }
+    jebp__read_vp8l_image(ctx, ctx->image, colcache_bits, huffman_image);
 }
 
 static void jebp__read_vp8l(jebp__context_t *ctx) {
