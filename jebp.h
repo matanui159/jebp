@@ -430,6 +430,7 @@ static void jebp__alloc_image(jebp__context_t *ctx, jebp_image_t *image) {
 }
 
 static void jebp__free_context(jebp__context_t *ctx) {
+    (void)ctx;
 #ifndef JEBP_NO_STDIO
     if (ctx->file != NULL) {
         fclose(ctx->file);

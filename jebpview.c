@@ -4,29 +4,98 @@
 #include <stdio.h>
 #include <SDL.h>
 
-static void jebpview_error(jebp_error_t error) {
-    fprintf(stderr, "%s\n", jebp_error_string(error));
+#define VIEW_TITLE_SIZE 1024
+#define VIEW_BLOCK_SIZE 16
+
+static jebp_image_t view_image;
+static char view_title[VIEW_TITLE_SIZE];
+static SDL_Window *view_window;
+static SDL_Surface *view_surface;
+
+static void view_destroy(void) {
+    jebp_free_image(&view_image);
+    if (view_window != NULL) {
+        SDL_DestroyWindow(view_window);
+    }
+    if (view_surface != NULL) {
+        SDL_FreeSurface(view_surface);
+    }
+    SDL_Quit();
+}
+
+static void view_error(const char *error) {
+    view_destroy();
+    fprintf(stderr, "%s\n", error);
     exit(EXIT_FAILURE);
 }
 
 int main(int argc, char **argv) {
     if (argc != 2) {
-        fprintf(stderr, "Usage: %s <WebP file>\n", argv[0]);
-        return EXIT_FAILURE;
+        view_error("Usage: jebpview <WebP file>");
+    }
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        view_error(SDL_GetError());
     }
 
-    jebp_image_t image;
-    jebp_error_t err = jebp_read_size(&image, argv[1]);
+    jebp_error_t err = jebp_read_size(&view_image, argv[1]);
     if (err != JEBP_OK) {
-        jebpview_error(err);
+        view_error(jebp_error_string(err));
     }
-    printf("WebP image size: %ix%i\n", image.width, image.height);
 
-    err = jebp_read(&image, argv[1]);
+    snprintf(view_title, VIEW_TITLE_SIZE, "jebpview - %s", argv[1]);
+    view_window = SDL_CreateWindow(
+        view_title,
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        (int)view_image.width, (int)view_image.height,
+        SDL_WINDOW_HIDDEN
+    );
+    if (view_window == NULL) {
+        view_error(SDL_GetError());
+    }
+
+    SDL_Surface *window_surface = SDL_GetWindowSurface(view_window);
+    Uint32 light = SDL_MapRGB(window_surface->format, 0xaa, 0xaa, 0xaa);
+    Uint32 dark = SDL_MapRGB(window_surface->format, 0x55, 0x55, 0x55);
+    SDL_FillRect(window_surface, NULL, light);
+    for (jebp_int y = 0; y < view_image.height; y += VIEW_BLOCK_SIZE * 2) {
+        for (jebp_int x = 0; x < view_image.width; x += VIEW_BLOCK_SIZE * 2) {
+            SDL_Rect rect = {
+                x + VIEW_BLOCK_SIZE, y,
+                VIEW_BLOCK_SIZE, VIEW_BLOCK_SIZE
+            };
+            SDL_FillRect(window_surface, &rect, dark);
+            rect.x -= VIEW_BLOCK_SIZE;
+            rect.y += VIEW_BLOCK_SIZE;
+            SDL_FillRect(window_surface, &rect, dark);
+        }
+    }
+
+    err = jebp_read(&view_image, argv[1]);
     if (err != JEBP_OK) {
-        jebpview_error(err);
+        view_error(jebp_error_string(err));
     }
 
-    jebp_free_image(&image);
-    return EXIT_SUCCESS;
+    view_surface = SDL_CreateRGBSurfaceWithFormatFrom(
+        view_image.pixels,
+        view_image.width, view_image.height,
+        32, view_image.width * 4,
+        SDL_PIXELFORMAT_RGBA8888
+    );
+    if (view_surface == NULL) {
+        view_error(SDL_GetError());
+    }
+    SDL_BlitSurface(view_surface, NULL, window_surface, NULL);
+    SDL_UpdateWindowSurface(view_window);
+    SDL_ShowWindow(view_window);
+
+    for (;;) {
+        SDL_Event event;
+        if (!SDL_WaitEvent(&event)) {
+            view_error(SDL_GetError());
+        }
+        if (event.type == SDL_QUIT) {
+            view_destroy();
+            return EXIT_SUCCESS;
+        }
+    }
 }
