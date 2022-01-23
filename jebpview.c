@@ -5,7 +5,7 @@
 #include <SDL.h>
 
 #define VIEW_TITLE_SIZE 1024
-#define VIEW_BLOCK_SIZE 16
+#define VIEW_BLOCK_SIZE 8
 
 static jebp_image_t view_image;
 static char view_title[VIEW_TITLE_SIZE];
@@ -47,7 +47,7 @@ int main(int argc, char **argv) {
         view_title,
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         (int)view_image.width, (int)view_image.height,
-        SDL_WINDOW_HIDDEN
+        SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN
     );
     if (view_window == NULL) {
         view_error(SDL_GetError());
@@ -79,7 +79,7 @@ int main(int argc, char **argv) {
         view_image.pixels,
         view_image.width, view_image.height,
         32, view_image.width * 4,
-        SDL_PIXELFORMAT_RGBA8888
+        SDL_PIXELFORMAT_RGBA32
     );
     if (view_surface == NULL) {
         view_error(SDL_GetError());

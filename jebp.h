@@ -395,6 +395,7 @@ static JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx, jebp_e
     (void)line;
 #endif // JEBP_LOG_ERRORS
 #ifdef JEBP_ERROR
+    (void)ctx;
     JEBP_ERROR(error);
     abort();
 #else // JEBP_ERROR
@@ -758,12 +759,12 @@ static JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx, jeb
     return symbol + jebp__read_bits(ctx, extrabits);
 }
 
-static JEBP__INLINE jebp_color_t jebp__index_subimage(jebp_image_t *image, jebp_color_t *pixel, jebp__subimage_t *subimage) {
+static JEBP__INLINE jebp_color_t *jebp__index_subimage(jebp_image_t *image, jebp_color_t *pixel, jebp__subimage_t *subimage) {
     jebp_int i = (jebp_int)(pixel - image->pixels);
     jebp_int x = i % image->width;
-    jebp_int y = i / image->height;
+    jebp_int y = i / image->width;
     jebp_int j = (y >> subimage->block_bits) * subimage->width + (x >> subimage->block_bits);
-    return subimage->pixels[j];
+    return &subimage->pixels[j];
 }
 
 static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jebp_int colcache_bits, jebp__subimage_t *huffman_image) {
@@ -815,7 +816,7 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
     JEBP__LOOP_IMAGE(image) {
         jebp__huffman_group_t *group = ctx->groups;
         if (huffman_image != NULL) {
-            jebp_int index = jebp__index_subimage(image, pixel, huffman_image).g;
+            jebp_int index = jebp__index_subimage(image, pixel, huffman_image)->g;
             group = &ctx->groups[index];
         }
         jebp_int main = jebp__read_symbol(ctx, &group->main);
@@ -880,6 +881,34 @@ static jebp_int jebp__read_transform(jebp__context_t *ctx, jebp__transform_t *tr
     return 1;
 }
 
+static JEBP__INLINE jebp_ubyte jebp__apply_color_delta(jebp_ubyte color, jebp_ubyte delta) {
+    return (jebp_ubyte)(((jebp_byte)color * (jebp_byte)delta) >> 5);
+}
+
+static JEBP__INLINE void jebp__apply_color_transform(jebp__context_t *ctx, jebp__subimage_t *image) {
+    JEBP__LOOP_IMAGE(ctx->image) {
+        jebp_color_t *delta = jebp__index_subimage(ctx->image, pixel, image);
+        pixel->r += jebp__apply_color_delta(pixel->g, delta->b);
+        pixel->b += jebp__apply_color_delta(pixel->g, delta->g);
+        pixel->b += jebp__apply_color_delta(pixel->r, delta->r);
+        pixel += 1;
+    }
+}
+
+static void jebp__apply_transform(jebp__context_t *ctx, jebp__transform_t *transform) {
+    switch (transform->type) {
+    case JEBP__TRANSFORM_NONE:
+        break;
+    case JEBP__TRANSFORM_PREDICT:
+        break;
+    case JEBP__TRANSFORM_COLOR:
+        jebp__apply_color_transform(ctx, &transform->image);
+        break;
+    default:
+        JEBP__ERROR(NOSUP);
+    }
+}
+
 /**
  * VP8L lossless codec
  */
@@ -921,6 +950,9 @@ static void jebp__read_vp8l_nohead(jebp__context_t *ctx) {
         jebp__read_subimage(ctx, huffman_image);
     }
     jebp__read_vp8l_image(ctx, ctx->image, colcache_bits, huffman_image);
+    for (int i = JEBP__NB_TRANSFORMS - 1; i >= 0; i -= 1) {
+        jebp__apply_transform(ctx, &ctx->transforms[i]);
+    }
 }
 
 static void jebp__read_vp8l(jebp__context_t *ctx) {
