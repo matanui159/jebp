@@ -212,11 +212,31 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 /**
  * Predefined macro detection
  */
+#if defined(__clang__)
+// The default GNUC version provided by Clang is just short of what we need
+#define JEBP__GNU_VERSION 403
+#elif defined(__GNUC__)
+#define JEBP__GNU_VERSION ((__GNUC__ * 100) + __GNUC_MINOR__)
+#else
+#define JEBP__GNU_VERSION 0
+#endif // __GNUC__
+
 #ifdef __has_attribute
 #define JEBP__HAS_ATTRIBUTE __has_attribute
 #else // __has_attribute
 #define JEBP__HAS_ATTRIBUTE(attr) 0
 #endif // __has_attribute
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define JEBP__NORETURN _Noreturn
+#elif JEBP__HAS_ATTRIBUTE(noreturn)
+#define JEBP__NORETURN __attribute__((noreturn))
+#elif defined(_WIN32)
+#define JEBP__NORETURN __declspec(noreturn)
+#else
+#define JEBP__NORETURN
+#endif
+// We don't add GCC version checks since, unlike __has_builtin, __has_attribute
+// has been out for so long that its more likely that the compiler supports it.
 #if JEBP__HAS_ATTRIBUTE(always_inline)
 #define JEBP__INLINE __attribute__((always_inline))
 #elif defined(_MSC_VER)
@@ -224,21 +244,23 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #else
 #define JEBP__INLINE inline
 #endif
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#define JEBP__NORETURN _Noreturn
-#elif JEBP__HAS_ATTRIBUTE(noreturn)
-#define JEBP__NORETURN __attribute__((noreturn))
+
+#ifdef __has_builtin
+#define JEBP__HAS_BUILTIN __has_builtin
+#else // __has_builtin
+#define JEBP__HAS_BUILTIN(builtin) 0
+#endif // __has_builtin
+#if JEBP__HAS_BUILTIN(__builtin_bswap32) || JEBP__GNU_VERSION >= 403
+// I believe this was added earlier but GCC 4.3 is the first time it was
+// mentioned in the changelog and manual.
+#define JEBP__SWAP32(value) __builtin_bswap32(value)
 #elif defined(_MSC_VER)
-#define JEBP__NORETURN __declspec(noreturn)
-#else
-#define JEBP__NORETURN
+#define JEBP__SWAP32(value) (jebp_uint)_byteswap_ulong((unsigned long)value)
 #endif
 
 #if defined(__i386) || defined(__i386__) || defined(_M_IX86)
 #define JEBP__LITTLE_ENDIAN
-#if defined(__SSE2__)
-#define JEBP__SIMD_SSE2
-#elif defined (_M_IX86_FP) && _M_IX86_FP == 2
+#if defined(__SSE2__) || _M_IX86_FP == 2
 #define JEBP__SIMD_SSE2
 #endif
 #elif defined(__amd64) || defined(__amd64__) || defined(_M_AMD64)
@@ -525,7 +547,7 @@ static jebp_uint jebp__read_uint32(jebp__context_t *ctx) {
     return value;
 #else // JEBP__LITTLE_ENDIAN
     jebp_ubyte bytes[4];
-    jebp__read_bytes(4, bytes);
+    jebp__read_bytes(ctx, 4, bytes);
     return (jebp_uint)(bytes[0] | ((bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24)));
 #endif // JEBP__LITTLE_ENDIAN
 }
@@ -711,7 +733,22 @@ static jebp_int jebp__read_colcache(jebp__context_t *ctx) {
     }
 }
 
-static jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx, jebp_int symbol) {
+static JEBP__INLINE void jebp__colcache_insert(jebp__context_t *ctx, jebp_color_t *color, jebp_int colcache_bits) {
+    if (colcache_bits == 0) {
+        return;
+    }
+#if defined(JEBP__LITTLE_ENDIAN) && defined(JEBP__SWAP32)
+    jebp_uint hash = *(jebp_uint *)color; // ABGR due to little-endian
+    hash = JEBP__SWAP32(hash); // RGBA
+    hash = (hash >> 8) | (hash << 24); // ARGB
+#else
+    jebp_uint hash = (jebp_uint)((color->a << 24) | ((color->r << 16) | (color->g << 8) | color->b));
+#endif
+    hash = (0x1e35a7bd * hash) >> (32 - colcache_bits);
+    ctx->colcache[hash] = *color; 
+}
+
+static JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx, jebp_int symbol) {
     if (symbol < 4) {
         return symbol + 1;
     }
@@ -749,7 +786,7 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
                 JEBP__ERROR(NOSUP);
             }
             if (pixel->g >= nb_groups) {
-                nb_groups = pixel->g;
+                nb_groups = pixel->g + 1;
             }
             pixel += 1;
         }
@@ -786,6 +823,7 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
             pixel->r = (jebp_ubyte)jebp__read_symbol(ctx, &group->red);
             pixel->b = (jebp_ubyte)jebp__read_symbol(ctx, &group->blue);
             pixel->a = (jebp_ubyte)jebp__read_symbol(ctx, &group->alpha);
+            jebp__colcache_insert(ctx, pixel, colcache_bits);
             pixel += 1;
         } else if (main < JEBP__NB_MAIN_SYMBOLS) {
             jebp_int length = jebp__read_vp8l_extrabits(ctx, main - JEBP__NB_COLOR_SYMBOLS);
@@ -801,10 +839,11 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
             jebp_color_t *repeat = pixel - dist;
             jebp_color_t *repeat_end = repeat + length;
             while (pixel != end && repeat != repeat_end) {
+                jebp__colcache_insert(ctx, repeat, colcache_bits);
                 *(pixel++) = *(repeat++);
             }
         } else {
-            JEBP__ERROR(NOSUP);
+            *(pixel++) = ctx->colcache[main - JEBP__NB_MAIN_SYMBOLS];
         }
     }
 }
