@@ -416,19 +416,15 @@ static JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx, jebp_e
 #define JEBP__CLEAR(ptr, size) memset(ptr, 0, size)
 #define JEBP__MIN(a, b) ((a) < (b) ? (a) : (b))
 #define JEBP__MAX(a, b) ((a) > (b) ? (a) : (b))
+#define JEBP__ABS(a) ((a) < 0 ? -(a) : (a))
+#define JEBP__AVG(a, b) (((a) + (b)) / 2)
 #define JEBP__CEIL_SHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
+#define JEBP__CLAMP_COLOR(c) JEBP__MIN(JEBP__MAX(c, 0), 255)
 #define JEBP__LOOP_IMAGE(image) for (\
     jebp_color_t *pixel = (image)->pixels, \
     *end = pixel + (image)->width * (image)->height; \
     pixel != end; \
 )
-
-static void jebp__alloc_image(jebp__context_t *ctx, jebp_image_t *image) {
-    image->pixels = JEBP_ALLOC((size_t)image->width * (size_t)image->height * sizeof(jebp_color_t));
-    if (image->pixels == NULL) {
-        JEBP__ERROR(NOMEM);
-    }
-}
 
 static void jebp__free_context(jebp__context_t *ctx) {
     (void)ctx;
@@ -455,6 +451,13 @@ static void jebp__free_context(jebp__context_t *ctx) {
     }
     JEBP_FREE(ctx->huffman_image.pixels);
 #endif // JEBP_NO_VP8L
+}
+
+static void jebp__alloc_image(jebp__context_t *ctx, jebp_image_t *image) {
+    image->pixels = JEBP_ALLOC((size_t)image->width * (size_t)image->height * sizeof(jebp_color_t));
+    if (image->pixels == NULL) {
+        JEBP__ERROR(NOMEM);
+    }
 }
 
 /**
@@ -859,6 +862,162 @@ static void jebp__read_subimage(jebp__context_t *ctx, jebp__subimage_t *image) {
 }
 
 /**
+ * VP8L predictions
+ */
+#define JEBP__NB_VP8L_PREDICTIONS 14
+
+typedef void (*jebp__vp8l_predict_t)(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t);
+
+static JEBP__INLINE void jebp__vp8l_predict_black(jebp_color_t *p) {
+    p->a += 0xff;
+}
+
+static void jebp__vp8l_predict0(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    (void)l;
+    (void)t;
+    jebp__vp8l_predict_black(p);
+}
+
+static JEBP__INLINE void jebp__vp8l_predict_left(jebp_color_t *p, jebp_color_t *l) {
+    p->r += l->r;
+    p->g += l->g;
+    p->b += l->b;
+    p->a += l->a;
+}
+
+static void jebp__vp8l_predict1(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    (void)t;
+    jebp__vp8l_predict_left(p, l);
+}
+
+static JEBP__INLINE void jebp__vp8l_predict_top(jebp_color_t *p, jebp_color_t *t) {
+    p->r += t->r;
+    p->g += t->g;
+    p->b += t->b;
+    p->a += t->a;
+}
+
+static void jebp__vp8l_predict2(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    (void)l;
+    jebp__vp8l_predict_top(p, t);
+}
+
+static void jebp__vp8l_predict3(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    (void)l;
+    p->r += t[1].r;
+    p->g += t[1].g;
+    p->b += t[1].b;
+    p->a += t[1].a;
+}
+
+static void jebp__vp8l_predict4(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    (void)l;
+    p->r += t[-1].r;
+    p->g += t[-1].g;
+    p->b += t[-1].b;
+    p->a += t[-1].a;
+}
+
+static void jebp__vp8l_predict5(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    p->r += JEBP__AVG(JEBP__AVG(l->r, t[1].r), t->r);
+    p->g += JEBP__AVG(JEBP__AVG(l->g, t[1].g), t->g);
+    p->b += JEBP__AVG(JEBP__AVG(l->b, t[1].b), t->b);
+    p->a += JEBP__AVG(JEBP__AVG(l->a, t[1].a), t->a);
+}
+
+static void jebp__vp8l_predict6(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    p->r += JEBP__AVG(l->r, t[-1].r);
+    p->g += JEBP__AVG(l->g, t[-1].g);
+    p->b += JEBP__AVG(l->b, t[-1].b);
+    p->a += JEBP__AVG(l->a, t[-1].a);
+}
+
+static void jebp__vp8l_predict7(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    p->r += JEBP__AVG(l->r, t->r);
+    p->g += JEBP__AVG(l->g, t->g);
+    p->b += JEBP__AVG(l->b, t->b);
+    p->a += JEBP__AVG(l->a, t->a);
+}
+
+static void jebp__vp8l_predict8(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    (void)l;
+    p->r += JEBP__AVG(t[-1].r, t->r);
+    p->g += JEBP__AVG(t[-1].g, t->g);
+    p->b += JEBP__AVG(t[-1].b, t->b);
+    p->a += JEBP__AVG(t[-1].a, t->a);
+}
+
+static void jebp__vp8l_predict9(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    (void)l;
+    p->r += JEBP__AVG(t->r, t[1].r);
+    p->g += JEBP__AVG(t->g, t[1].g);
+    p->b += JEBP__AVG(t->b, t[1].b);
+    p->a += JEBP__AVG(t->a, t[1].a);
+}
+
+static void jebp__vp8l_predict10(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    p->r += JEBP__AVG(JEBP__AVG(l->r, t[-1].r), JEBP__AVG(t->r, t[1].r));
+    p->g += JEBP__AVG(JEBP__AVG(l->g, t[-1].g), JEBP__AVG(t->g, t[1].g));
+    p->b += JEBP__AVG(JEBP__AVG(l->b, t[-1].b), JEBP__AVG(t->b, t[1].b));
+    p->a += JEBP__AVG(JEBP__AVG(l->a, t[-1].a), JEBP__AVG(t->a, t[1].a));
+}
+
+static JEBP__INLINE jebp_int jebp__vp8l_predict_dist(jebp_color_t *c, jebp_int pr, jebp_int pg, jebp_int pb, jebp_int pa) {
+    return JEBP__ABS(pr - c->r) + JEBP__ABS(pg - c->g) + JEBP__ABS(pb - c->b) + JEBP__ABS(pa - c->a);
+}
+
+static void jebp__vp8l_predict11(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    jebp_int pr = l->r + t->r - t[-1].r;
+    jebp_int pg = l->g + t->g - t[-1].g;
+    jebp_int pb = l->b + t->b - t[-1].b;
+    jebp_int pa = l->a + t->a - t[-1].a;
+    jebp_int pleft = jebp__vp8l_predict_dist(l, pr, pg, pb, pa);
+    jebp_int ptop = jebp__vp8l_predict_dist(t, pr, pg, pb, pa);
+    if (pleft < ptop) {
+        jebp__vp8l_predict_left(p, l);
+    } else {
+        jebp__vp8l_predict_top(p, t);
+    }
+}
+
+static void jebp__vp8l_predict12(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    p->r += JEBP__CLAMP_COLOR(l->r + t->r - t[-1].r);
+    p->g += JEBP__CLAMP_COLOR(l->g + t->g - t[-1].g);
+    p->b += JEBP__CLAMP_COLOR(l->b + t->b - t[-1].b);
+    p->a += JEBP__CLAMP_COLOR(l->a + t->a - t[-1].a);
+}
+
+static void jebp__vp8l_predict13(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+    jebp_color_t avg = {
+        JEBP__AVG(l->r, t->r),
+        JEBP__AVG(l->g, t->g),
+        JEBP__AVG(l->b, t->b),
+        JEBP__AVG(l->a, t->a)
+    };
+    p->r += JEBP__CLAMP_COLOR(avg.r + (avg.r - t[-1].r) / 2);
+    p->g += JEBP__CLAMP_COLOR(avg.g + (avg.g - t[-1].g) / 2);
+    p->b += JEBP__CLAMP_COLOR(avg.b + (avg.b - t[-1].b) / 2);
+    p->a += JEBP__CLAMP_COLOR(avg.a + (avg.a - t[-1].a) / 2);
+}
+
+static jebp__vp8l_predict_t jebp__vp8l_predictions[JEBP__NB_VP8L_PREDICTIONS] = {
+    jebp__vp8l_predict0,
+    jebp__vp8l_predict1,
+    jebp__vp8l_predict2,
+    jebp__vp8l_predict3,
+    jebp__vp8l_predict4,
+    jebp__vp8l_predict5,
+    jebp__vp8l_predict6,
+    jebp__vp8l_predict7,
+    jebp__vp8l_predict8,
+    jebp__vp8l_predict9,
+    jebp__vp8l_predict10,
+    jebp__vp8l_predict11,
+    jebp__vp8l_predict12,
+    jebp__vp8l_predict13,
+};
+
+/**
  * VP8L transforms
  */
 // returns 0 if there are no more transforms to read
@@ -881,6 +1040,30 @@ static jebp_int jebp__read_transform(jebp__context_t *ctx, jebp__transform_t *tr
     return 1;
 }
 
+static JEBP__INLINE void jebp__apply_predict_transform(jebp__context_t *ctx, jebp__subimage_t *image) {
+    JEBP__LOOP_IMAGE(ctx->image) {
+        jebp_color_t *l = pixel - 1;
+        jebp_color_t *t = pixel - ctx->image->width;
+        if (pixel == ctx->image->pixels) {
+            // Use opaque-black prediction for top-left pixel
+            jebp__vp8l_predict_black(pixel);
+        } else if (t < ctx->image->pixels) {
+            // Use left prediction for the top row
+            jebp__vp8l_predict_left(pixel, l);
+        } else if ((pixel - ctx->image->pixels) % ctx->image->width == 0) {
+            // Use top prediction for left row
+            jebp__vp8l_predict_top(pixel, t);
+        } else {
+            jebp_int predict = jebp__index_subimage(ctx->image, pixel, image)->g;
+            if (predict >= JEBP__NB_VP8L_PREDICTIONS) {
+                JEBP__ERROR(INVDATA);
+            }
+            jebp__vp8l_predictions[predict](pixel, l, t);
+        }
+        pixel += 1;
+    }
+}
+
 static JEBP__INLINE jebp_ubyte jebp__apply_color_delta(jebp_ubyte color, jebp_ubyte delta) {
     return (jebp_ubyte)(((jebp_byte)color * (jebp_byte)delta) >> 5);
 }
@@ -900,6 +1083,7 @@ static void jebp__apply_transform(jebp__context_t *ctx, jebp__transform_t *trans
     case JEBP__TRANSFORM_NONE:
         break;
     case JEBP__TRANSFORM_PREDICT:
+        jebp__apply_predict_transform(ctx, &transform->image);
         break;
     case JEBP__TRANSFORM_COLOR:
         jebp__apply_color_transform(ctx, &transform->image);
