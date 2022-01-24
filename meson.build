@@ -31,12 +31,12 @@ endif
 sdl2 = dependency('sdl2', required: get_option('jebp_sdl2'))
 
 static_library(
-    'jebp', ['jebp.h', 'jebp.c'],
+    'jebp', 'jebp.c',
     c_args: c_args
 )
 if sdl2.found()
     executable(
-        'jebpview', ['jebp.h', 'jebpview.c'],
+        'jebpview', 'jebpview.c',
         c_args: c_args,
         dependencies: sdl2
     )

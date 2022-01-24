@@ -1086,6 +1086,14 @@ static JEBP__INLINE void jebp__apply_color_transform(jebp__context_t *ctx, jebp_
     }
 }
 
+static JEBP__INLINE void jebp__apply_green_transform(jebp__context_t *ctx) {
+    JEBP__LOOP_IMAGE(ctx->image) {
+        pixel->r += pixel->g;
+        pixel->b += pixel->g;
+        pixel += 1;
+    }
+}
+
 static void jebp__apply_transform(jebp__context_t *ctx, jebp__transform_t *transform) {
     switch (transform->type) {
     case JEBP__TRANSFORM_NONE:
@@ -1095,6 +1103,9 @@ static void jebp__apply_transform(jebp__context_t *ctx, jebp__transform_t *trans
         break;
     case JEBP__TRANSFORM_COLOR:
         jebp__apply_color_transform(ctx, &transform->image);
+        break;
+    case JEBP__TRANSFORM_GREEN:
+        jebp__apply_green_transform(ctx);
         break;
     default:
         JEBP__ERROR(NOSUP);
