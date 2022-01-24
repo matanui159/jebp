@@ -1,0 +1,5 @@
+option('jebp_stdio', type: 'boolean', value: true)
+option('jebp_simd', type: 'boolean', value: true)
+option('jebp_log_errors', type: 'feature', value: 'auto')
+option('jebp_vp8l', type: 'boolean', value: true)
+option('jebp_sdl2', type: 'feature', value: 'auto')

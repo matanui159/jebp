@@ -453,12 +453,17 @@ static void jebp__free_context(jebp__context_t *ctx) {
 #endif // JEBP_NO_VP8L
 }
 
+// Currently only used by VP8L
+// TODO: after VP8(no-L) support is added, make it an error to remove both
+//       VP8 and VP8L
+#ifndef JEBP_NO_VP8L
 static void jebp__alloc_image(jebp__context_t *ctx, jebp_image_t *image) {
     image->pixels = JEBP_ALLOC((size_t)image->width * (size_t)image->height * sizeof(jebp_color_t));
     if (image->pixels == NULL) {
         JEBP__ERROR(NOMEM);
     }
 }
+#endif // JEBP_NO_VP8L
 
 /**
  * Reader abstraction
@@ -512,6 +517,8 @@ static void jebp__read_bytes(jebp__context_t *ctx, size_t size, void *data) {
     }
 }
 
+// Bit-reading is currently only used by VP8L
+#ifndef JEBP_NO_VP8L
 static jebp_ubyte jebp__read_uint8(jebp__context_t *ctx) {
     ctx->nb_bits = 0;
     jebp__check_chunk(ctx, &ctx->webp_chunk, 1);
@@ -538,6 +545,7 @@ static jebp_int jebp__read_bits(jebp__context_t *ctx, jebp_int size) {
     }
     return bits;
 }
+#endif // JEBP_NO_VP8L
 
 /**
  * RIFF container

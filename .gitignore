@@ -1,6 +1,6 @@
 # Build files
-*.o
-/jebpview
+/bin/
+/build/
 
 # IDE files
 /.vscode/
