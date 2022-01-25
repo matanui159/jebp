@@ -200,14 +200,13 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
  * IMPLEMENTATION
  */
 #ifdef JEBP_IMPLEMENTATION
-#include <stdlib.h>
 #include <string.h>
 #if !defined(JEBP_NO_STDIO) || defined(JEBP_LOG_ERRORS)
 #include <stdio.h>
 #endif
 #ifndef JEBP_ERROR
 #include <setjmp.h>
-#endif
+#endif // JEBP_ERROR
 
 /**
  * Predefined macro detection
@@ -397,7 +396,6 @@ static JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx, jebp_e
 #ifdef JEBP_ERROR
     (void)ctx;
     JEBP_ERROR(error);
-    abort();
 #else // JEBP_ERROR
     ctx->error = error;
     longjmp(ctx->jump, 1);

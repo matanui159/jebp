@@ -1,0 +1,33 @@
+> rose.webp
+"Free Stock Photo in High Resolution - Yellow Rose 3 - Flowers"
+Image Author: Jon Sullivan
+This file is in the public domain.
+https://web.archive.org/web/20190909072451/http://www.public-domain-photos.com/free-stock-photos-4/flowers/yellow-rose-3.jpg
+WebP version from Google.
+https://www.gstatic.com/webp/gallery3/1_webp_ll.webp
+
+> tux.webp
+"baby tux for my user page"
+Image Author: Fizyplankton
+This file is in the public domain.
+https://web.archive.org/web/20111213095701/http://www.minecraftwiki.net/images/8/85/Fizyplankton.png
+WebP version from Google.
+https://www.gstatic.com/webp/gallery3/2_webp_ll.webp
+
+> dice.webp
+"PNG transparency demonstration"
+Image Author: POV-Ray source code
+Photo licensed under the Creative Commons Attribution-Share Alike 3.0 Unported license:
+    https://creativecommons.org/licenses/by-sa/3.0/deed.en
+https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png
+WebP version from Google.
+https://www.gstatic.com/webp/gallery3/3_webp_ll.webp
+
+> compass.webp
+"Transparent compass card for overlays"
+Image Author: Denelson83
+This file is licenced under the Creative Commons Attribution-Share Alike 3.0 Unported license:
+    https://creativecommons.org/licenses/by-sa/3.0/deed.en
+https://upload.wikimedia.org/wikipedia/commons/d/d3/Compass_Card_transparent.png
+Webp version from Google.
+https://www.gstatic.com/webp/gallery3/5_webp_ll.webp

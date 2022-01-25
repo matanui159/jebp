@@ -9,10 +9,6 @@ c_args = cc.get_supported_arguments(
     '-Wstrict-prototypes',
     '-Wmissing-prototypes'
 )
-jebp_stdio = get_option('jebp_stdio')
-if not jebp_stdio
-    c_args += ['-DJEBP_NO_STDIO']
-endif
 if not get_option('jebp_simd')
     c_args += ['-DJEBP_NO_SIMD']
 endif
@@ -20,7 +16,7 @@ jebp_log_errors = get_option('jebp_log_errors')
 if jebp_log_errors.enabled()
     log_errors = true
 elif jebp_log_errors.auto()
-    log_errors = jebp_stdio and get_option('debug')
+    log_errors = get_option('debug')
 endif
 if log_errors
     c_args += ['-DJEBP_LOG_ERRORS']
@@ -29,11 +25,6 @@ if not get_option('jebp_vp8l')
     c_args += ['-DJEBP_NO_VP8L']
 endif
 sdl2 = dependency('sdl2', required: get_option('jebp_sdl2'))
-
-static_library(
-    'jebp', 'jebp.c',
-    c_args: c_args
-)
 if sdl2.found()
     executable(
         'jebpview', 'jebpview.c',
@@ -41,3 +32,42 @@ if sdl2.found()
         dependencies: sdl2
     )
 endif
+
+##
+# Tests
+##
+test_file = executable(
+    'test_file', 'test/test_file.c',
+    c_args: c_args,
+)
+test_memory = executable(
+    'test_memory', 'test/test_memory.c',
+    c_args: c_args,
+    include_directories: 'test/sys/stdio'
+)
+test_alloc = executable(
+    'test_alloc', 'test/test_alloc.c',
+    c_args: c_args,
+    include_directories: 'test/sys/stdlib'
+)
+tests = [
+    { 'name': 'lossless-rose', 'file': 'test/lossless/rose.webp', 'size': '400x301', 'hash': '9f24f39d' },
+    { 'name': 'lossless-dice', 'file': 'test/lossless/dice.webp', 'size': '800x600', 'hash': 'cb524cc8' }
+]
+foreach test : tests
+    test(
+        'file-'+test['name'], test_file,
+        args: [test['file'], test['size'], test['hash']],
+        workdir: meson.current_source_dir()
+    )
+    test(
+        'memory-'+test['name'], test_memory,
+        args: [test['file'], test['size'], test['hash']],
+        workdir: meson.current_source_dir()
+    )
+    test(
+        'alloc-'+test['name'], test_memory,
+        args: [test['file'], test['size'], test['hash']],
+        workdir: meson.current_source_dir()
+    )
+endforeach
