@@ -1,8 +1,8 @@
 #define JEBP_IMPLEMENTATION
 #include "jebp.h"
-#include <stdlib.h>
-#include <stdio.h>
 #include <SDL.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #define VIEW_TITLE_SIZE 1024
 #define VIEW_BLOCK_SIZE 8
@@ -44,11 +44,9 @@ int main(int argc, char **argv) {
 
     snprintf(view_title, VIEW_TITLE_SIZE, "jebpview - %s", argv[1]);
     view_window = SDL_CreateWindow(
-        view_title,
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        view_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         (int)view_image.width, (int)view_image.height,
-        SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN
-    );
+        SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
     if (view_window == NULL) {
         view_error(SDL_GetError());
     }
@@ -59,10 +57,8 @@ int main(int argc, char **argv) {
     SDL_FillRect(window_surface, NULL, light);
     for (jebp_int y = 0; y < view_image.height; y += VIEW_BLOCK_SIZE * 2) {
         for (jebp_int x = 0; x < view_image.width; x += VIEW_BLOCK_SIZE * 2) {
-            SDL_Rect rect = {
-                x + VIEW_BLOCK_SIZE, y,
-                VIEW_BLOCK_SIZE, VIEW_BLOCK_SIZE
-            };
+            SDL_Rect rect = {x + VIEW_BLOCK_SIZE, y, VIEW_BLOCK_SIZE,
+                             VIEW_BLOCK_SIZE};
             SDL_FillRect(window_surface, &rect, dark);
             rect.x -= VIEW_BLOCK_SIZE;
             rect.y += VIEW_BLOCK_SIZE;
@@ -76,11 +72,8 @@ int main(int argc, char **argv) {
     }
 
     view_surface = SDL_CreateRGBSurfaceWithFormatFrom(
-        view_image.pixels,
-        view_image.width, view_image.height,
-        32, view_image.width * 4,
-        SDL_PIXELFORMAT_RGBA32
-    );
+        view_image.pixels, view_image.width, view_image.height, 32,
+        view_image.width * 4, SDL_PIXELFORMAT_RGBA32);
     if (view_surface == NULL) {
         view_error(SDL_GetError());
     }

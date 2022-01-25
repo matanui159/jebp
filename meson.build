@@ -52,7 +52,9 @@ test_alloc = executable(
 )
 tests = [
     { 'name': 'lossless-rose', 'file': 'test/lossless/rose.webp', 'size': '400x301', 'hash': '9f24f39d' },
-    { 'name': 'lossless-dice', 'file': 'test/lossless/dice.webp', 'size': '800x600', 'hash': 'cb524cc8' }
+    # { 'name': 'lossless-tux', 'file': 'test/lossless/tux.webp', 'size': '386x395', 'hash': '0' },
+    { 'name': 'lossless-dice', 'file': 'test/lossless/dice.webp', 'size': '800x600', 'hash': 'cb524cc8' },
+    # { 'name': 'lossless-compass', 'file': 'test/lossless/compass.webp', 'size': '300x300', 'hash': '0' }
 ]
 foreach test : tests
     test(

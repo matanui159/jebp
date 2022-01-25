@@ -142,8 +142,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
-#include <stddef.h>
 #include <limits.h>
+#include <stddef.h>
 
 typedef signed char jebp_byte;
 typedef unsigned char jebp_ubyte;
@@ -157,12 +157,12 @@ typedef unsigned long jebp_uint;
 
 typedef enum jebp_error_t {
     JEBP_OK,
-    JEBP_ERROR_INVAL, // Invalid value
+    JEBP_ERROR_INVAL,   // Invalid value
     JEBP_ERROR_INVDATA, // Invalid data
-    JEBP_ERROR_EOF, // End of file
-    JEBP_ERROR_NOSUP, // Not supported
-    JEBP_ERROR_NOMEM, // No memory
-    JEBP_ERROR_IO, // I/O error
+    JEBP_ERROR_EOF,     // End of file
+    JEBP_ERROR_NOSUP,   // Not supported
+    JEBP_ERROR_NOMEM,   // No memory
+    JEBP_ERROR_IO,      // I/O error
     JEBP_ERROR_UNKNOWN, // Unknown error
     JEBP_NB_ERRORS
 } jebp_error_t;
@@ -182,7 +182,8 @@ typedef struct jebp_image_t {
 
 const char *jebp_error_string(jebp_error_t err);
 void jebp_free_image(jebp_image_t *image);
-jebp_error_t jebp_decode_size(jebp_image_t *image, size_t size, const void *data);
+jebp_error_t jebp_decode_size(jebp_image_t *image, size_t size,
+                              const void *data);
 jebp_error_t jebp_decode(jebp_image_t *image, size_t size, const void *data);
 
 // I/O API
@@ -254,7 +255,7 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 // mentioned in the changelog and manual.
 #define JEBP__SWAP32(value) __builtin_bswap32(value)
 #elif defined(_MSC_VER)
-#define JEBP__SWAP32(value) (jebp_uint)_byteswap_ulong((unsigned long)value)
+#define JEBP__SWAP32(value) (jebp_uint) _byteswap_ulong((unsigned long)value)
 #endif
 
 #if defined(__i386) || defined(__i386__) || defined(_M_IX86)
@@ -309,7 +310,7 @@ typedef struct jebp__chunk_t {
 // length are increments of the previous code, meaning we can create a table
 // for each length which we can index to get the value.
 //
-// There are faster/nicer ways to decode huffman codes but they often require 
+// There are faster/nicer ways to decode huffman codes but they often require
 // peeking the next n bits which is not easy with how the reader was designed.
 typedef struct jebp__huffman_table_t {
     jebp_int min_code;
@@ -386,22 +387,26 @@ typedef struct jebp__context_t {
 /**
  * Common utilities
  */
-static JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx, jebp_error_t error, const char *file, jebp_int line) {
+static JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
+                                                    jebp_error_t error,
+                                                    const char *file,
+                                                    jebp_int line) {
 #ifdef JEBP_LOG_ERRORS
     fprintf(stderr, "%s:%i: %s\n", file, line, jebp_error_string(error));
-#else // JEBP_LOG_ERRORS
+#else  // JEBP_LOG_ERRORS
     (void)file;
     (void)line;
 #endif // JEBP_LOG_ERRORS
 #ifdef JEBP_ERROR
     (void)ctx;
     JEBP_ERROR(error);
-#else // JEBP_ERROR
+#else  // JEBP_ERROR
     ctx->error = error;
     longjmp(ctx->jump, 1);
 #endif // JEBP_ERROR
 }
-#define JEBP__ERROR(error) jebp__error(ctx, JEBP_ERROR_##error, __FILE__, __LINE__)
+#define JEBP__ERROR(error)                                                     \
+    jebp__error(ctx, JEBP_ERROR_##error, __FILE__, __LINE__)
 
 #if !defined(JEBP_ALLOC) && !defined(JEBP_FREE)
 #include <stdlib.h>
@@ -418,11 +423,10 @@ static JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx, jebp_e
 #define JEBP__AVG(a, b) (((a) + (b)) / 2)
 #define JEBP__CEIL_SHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
 #define JEBP__CLAMP_COLOR(c) JEBP__MIN(JEBP__MAX(c, 0), 255)
-#define JEBP__LOOP_IMAGE(image) for (\
-    jebp_color_t *pixel = (image)->pixels, \
-    *end = pixel + (image)->width * (image)->height; \
-    pixel != end; \
-)
+#define JEBP__LOOP_IMAGE(image)                                                \
+    for (jebp_color_t *pixel = (image)->pixels,                                \
+                      *end = pixel + (image)->width * (image)->height;         \
+         pixel != end;)
 
 static void jebp__free_context(jebp__context_t *ctx) {
     (void)ctx;
@@ -456,7 +460,8 @@ static void jebp__free_context(jebp__context_t *ctx) {
 //       VP8 and VP8L
 #ifndef JEBP_NO_VP8L
 static void jebp__alloc_image(jebp__context_t *ctx, jebp_image_t *image) {
-    image->pixels = JEBP_ALLOC((size_t)image->width * (size_t)image->height * sizeof(jebp_color_t));
+    image->pixels = JEBP_ALLOC((size_t)image->width * (size_t)image->height *
+                               sizeof(jebp_color_t));
     if (image->pixels == NULL) {
         JEBP__ERROR(NOMEM);
     }
@@ -488,7 +493,8 @@ static void jebp__check_buffer(jebp__context_t *ctx) {
     }
 }
 
-static void jebp__check_chunk(jebp__context_t *ctx, jebp__chunk_t *chunk, size_t size) {
+static void jebp__check_chunk(jebp__context_t *ctx, jebp__chunk_t *chunk,
+                              size_t size) {
     if (chunk->tag != 0) {
         if (size > chunk->size) {
             JEBP__ERROR(INVDATA);
@@ -523,7 +529,7 @@ static jebp_ubyte jebp__read_uint8(jebp__context_t *ctx) {
     jebp__check_chunk(ctx, &ctx->codec_chunk, 1);
     jebp__check_buffer(ctx);
     ctx->nb_bytes -= 1;
-    return (jebp_ubyte)*(ctx->bytes++);
+    return (jebp_ubyte) * (ctx->bytes++);
 }
 
 static jebp_int jebp__read_bits(jebp__context_t *ctx, jebp_int size) {
@@ -556,10 +562,11 @@ static jebp_uint jebp__read_uint32(jebp__context_t *ctx) {
     jebp_uint value = 0;
     jebp__read_bytes(ctx, 4, &value);
     return value;
-#else // JEBP__LITTLE_ENDIAN
+#else  // JEBP__LITTLE_ENDIAN
     jebp_ubyte bytes[4];
     jebp__read_bytes(ctx, 4, bytes);
-    return (jebp_uint)(bytes[0] | ((bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24)));
+    return (jebp_uint)(bytes[0] |
+                       ((bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24)));
 #endif // JEBP__LITTLE_ENDIAN
 }
 
@@ -592,10 +599,10 @@ static void jebp__read_header(jebp__context_t *ctx) {
 #define JEBP__NB_MAIN_SYMBOLS (JEBP__NB_COLOR_SYMBOLS + JEBP__NB_LENGTH_SYMBOLS)
 
 static const jebp_int jebp__meta_length_order[JEBP__NB_META_SYMBOLS] = {
-    17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
-};
+    17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 
-static void jebp__build_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman, jebp_int nb_lengths) {
+static void jebp__build_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman,
+                                jebp_int nb_lengths) {
     jebp__huffman_table_t *table = huffman->tables;
     table->min_code = 0;
     table->max_code = 0;
@@ -631,7 +638,8 @@ static void jebp__build_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman, 
     }
 }
 
-static jebp_int jebp__read_symbol(jebp__context_t *ctx, jebp__huffman_t *huffman) {
+static jebp_int jebp__read_symbol(jebp__context_t *ctx,
+                                  jebp__huffman_t *huffman) {
     jebp__huffman_table_t *table = huffman->tables;
     if (table->max_code > 0) {
         return table->values[0];
@@ -647,7 +655,8 @@ static jebp_int jebp__read_symbol(jebp__context_t *ctx, jebp__huffman_t *huffman
     JEBP__ERROR(INVDATA);
 }
 
-static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman, jebp_int nb_lengths) {
+static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman,
+                               jebp_int nb_lengths) {
     // This part of the spec is INCREDIBLY wrong and partly missing
     // Using libwebp as a reference
     size_t lengths_size = (size_t)nb_lengths * sizeof(jebp_int);
@@ -683,7 +692,8 @@ static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman, j
         }
 
         jebp_int prev_length = 8;
-        for (jebp_int i = 0; i < nb_lengths && nb_symbols > 0; nb_symbols -= 1) {
+        for (jebp_int i = 0; i < nb_lengths && nb_symbols > 0;
+             nb_symbols -= 1) {
             jebp_int symbol = jebp__read_symbol(ctx, huffman);
             jebp_int length;
             jebp_int repeat;
@@ -719,17 +729,21 @@ static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman, j
 #define JEBP__NB_VP8L_OFFSETS 120
 
 static jebp_byte jebp__vp8l_offsets[JEBP__NB_VP8L_OFFSETS][2] = {
-{0,1},{1,0},{1,1},{-1,1},{0,2},{2,0},{1,2},{-1,2},{2,1},{-2,1},{2,2},{-2,2},{0,3
-},{3,0},{1,3},{-1,3},{3,1},{-3,1},{2,3},{-2,3},{3,2},{-3,2},{0,4},{4,0},{1,4},{
--1,4},{4,1},{-4,1},{3,3},{-3,3},{2,4},{-2,4},{4,2},{-4,2},{0,5},{3,4},{-3,4},{4,
-3},{-4,3},{5,0},{1,5},{-1,5},{5,1},{-5,1},{2,5},{-2,5},{5,2},{-5,2},{4,4},{-4,4}
-,{3,5},{-3,5},{5,3},{-5,3},{0,6},{6,0},{1,6},{-1,6},{6,1},{-6,1},{2,6},{-2,6},{6
-,2},{-6,2},{4,5},{-4,5},{5,4},{-5,4},{3,6},{-3,6},{6,3},{-6,3},{0,7},{7,0},{1,7}
-,{-1,7},{5,5},{-5,5},{7,1},{-7,1},{4,6},{-4,6},{6,4},{-6,4},{2,7},{-2,7},{7,2},{
--7,2},{3,7},{-3,7},{7,3},{-7,3},{5,6},{-5,6},{6,5},{-6,5},{8,0},{4,7},{-4,7},{7,
-4},{-7,4},{8,1},{8,2},{6,6},{-6,6},{8,3},{5,7},{-5,7},{7,5},{-7,5},{8,4},{6,7},{
--6,7},{7,6},{-7,6},{8,5},{7,7},{-7,7},{8,6},{8,7}
-};
+    {0, 1},  {1, 0},  {1, 1},  {-1, 1}, {0, 2},  {2, 0},  {1, 2},  {-1, 2},
+    {2, 1},  {-2, 1}, {2, 2},  {-2, 2}, {0, 3},  {3, 0},  {1, 3},  {-1, 3},
+    {3, 1},  {-3, 1}, {2, 3},  {-2, 3}, {3, 2},  {-3, 2}, {0, 4},  {4, 0},
+    {1, 4},  {-1, 4}, {4, 1},  {-4, 1}, {3, 3},  {-3, 3}, {2, 4},  {-2, 4},
+    {4, 2},  {-4, 2}, {0, 5},  {3, 4},  {-3, 4}, {4, 3},  {-4, 3}, {5, 0},
+    {1, 5},  {-1, 5}, {5, 1},  {-5, 1}, {2, 5},  {-2, 5}, {5, 2},  {-5, 2},
+    {4, 4},  {-4, 4}, {3, 5},  {-3, 5}, {5, 3},  {-5, 3}, {0, 6},  {6, 0},
+    {1, 6},  {-1, 6}, {6, 1},  {-6, 1}, {2, 6},  {-2, 6}, {6, 2},  {-6, 2},
+    {4, 5},  {-4, 5}, {5, 4},  {-5, 4}, {3, 6},  {-3, 6}, {6, 3},  {-6, 3},
+    {0, 7},  {7, 0},  {1, 7},  {-1, 7}, {5, 5},  {-5, 5}, {7, 1},  {-7, 1},
+    {4, 6},  {-4, 6}, {6, 4},  {-6, 4}, {2, 7},  {-2, 7}, {7, 2},  {-7, 2},
+    {3, 7},  {-3, 7}, {7, 3},  {-7, 3}, {5, 6},  {-5, 6}, {6, 5},  {-6, 5},
+    {8, 0},  {4, 7},  {-4, 7}, {7, 4},  {-7, 4}, {8, 1},  {8, 2},  {6, 6},
+    {-6, 6}, {8, 3},  {5, 7},  {-5, 7}, {7, 5},  {-7, 5}, {8, 4},  {6, 7},
+    {-6, 7}, {7, 6},  {-7, 6}, {8, 5},  {7, 7},  {-7, 7}, {8, 6},  {8, 7}};
 
 static jebp_int jebp__read_colcache(jebp__context_t *ctx) {
     if (jebp__read_bits(ctx, 1)) {
@@ -744,22 +758,27 @@ static jebp_int jebp__read_colcache(jebp__context_t *ctx) {
     }
 }
 
-static JEBP__INLINE void jebp__colcache_insert(jebp__context_t *ctx, jebp_color_t *color, jebp_int colcache_bits) {
+static JEBP__INLINE void jebp__colcache_insert(jebp__context_t *ctx,
+                                               jebp_color_t *color,
+                                               jebp_int colcache_bits) {
     if (colcache_bits == 0) {
         return;
     }
 #if defined(JEBP__LITTLE_ENDIAN) && defined(JEBP__SWAP32)
     jebp_uint hash = *(jebp_uint *)color; // ABGR due to little-endian
-    hash = JEBP__SWAP32(hash); // RGBA
-    hash = (hash >> 8) | (hash << 24); // ARGB
+    hash = JEBP__SWAP32(hash);            // RGBA
+    hash = (hash >> 8) | (hash << 24);    // ARGB
 #else
-    jebp_uint hash = (jebp_uint)((color->a << 24) | ((color->r << 16) | (color->g << 8) | color->b));
+    jebp_uint hash =
+        (jebp_uint)((color->a << 24) |
+                    ((color->r << 16) | (color->g << 8) | color->b));
 #endif
     hash = (0x1e35a7bd * hash) >> (32 - colcache_bits);
-    ctx->colcache[hash] = *color; 
+    ctx->colcache[hash] = *color;
 }
 
-static JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx, jebp_int symbol) {
+static JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx,
+                                                       jebp_int symbol) {
     if (symbol < 4) {
         return symbol + 1;
     }
@@ -768,15 +787,20 @@ static JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx, jeb
     return symbol + jebp__read_bits(ctx, extrabits);
 }
 
-static JEBP__INLINE jebp_color_t *jebp__index_subimage(jebp_image_t *image, jebp_color_t *pixel, jebp__subimage_t *subimage) {
+static JEBP__INLINE jebp_color_t *
+jebp__index_subimage(jebp_image_t *image, jebp_color_t *pixel,
+                     jebp__subimage_t *subimage) {
     jebp_int i = (jebp_int)(pixel - image->pixels);
     jebp_int x = i % image->width;
     jebp_int y = i / image->width;
-    jebp_int j = (y >> subimage->block_bits) * subimage->width + (x >> subimage->block_bits);
+    jebp_int j = (y >> subimage->block_bits) * subimage->width +
+                 (x >> subimage->block_bits);
     return &subimage->pixels[j];
 }
 
-static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jebp_int colcache_bits, jebp__subimage_t *huffman_image) {
+static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image,
+                                  jebp_int colcache_bits,
+                                  jebp__subimage_t *huffman_image) {
     jebp_int nb_colcache_symbols = colcache_bits == 0 ? 0 : 1 << colcache_bits;
     size_t colcache_size = (size_t)nb_colcache_symbols * sizeof(jebp_color_t);
     if (colcache_bits > ctx->colcache_bits) {
@@ -814,7 +838,8 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
     }
     for (jebp_int i = 0; i < nb_groups; i += 1) {
         jebp__huffman_group_t *group = &ctx->groups[i];
-        jebp__read_huffman(ctx, &group->main, JEBP__NB_MAIN_SYMBOLS + nb_colcache_symbols);
+        jebp__read_huffman(ctx, &group->main,
+                           JEBP__NB_MAIN_SYMBOLS + nb_colcache_symbols);
         jebp__read_huffman(ctx, &group->red, JEBP__NB_COLOR_SYMBOLS);
         jebp__read_huffman(ctx, &group->blue, JEBP__NB_COLOR_SYMBOLS);
         jebp__read_huffman(ctx, &group->alpha, JEBP__NB_COLOR_SYMBOLS);
@@ -825,7 +850,8 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
     JEBP__LOOP_IMAGE(image) {
         jebp__huffman_group_t *group = ctx->groups;
         if (huffman_image != NULL) {
-            jebp_int index = jebp__index_subimage(image, pixel, huffman_image)->g;
+            jebp_int index =
+                jebp__index_subimage(image, pixel, huffman_image)->g;
             group = &ctx->groups[index];
         }
         jebp_int main = jebp__read_symbol(ctx, &group->main);
@@ -837,7 +863,8 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image, jeb
             jebp__colcache_insert(ctx, pixel, colcache_bits);
             pixel += 1;
         } else if (main < JEBP__NB_MAIN_SYMBOLS) {
-            jebp_int length = jebp__read_vp8l_extrabits(ctx, main - JEBP__NB_COLOR_SYMBOLS);
+            jebp_int length =
+                jebp__read_vp8l_extrabits(ctx, main - JEBP__NB_COLOR_SYMBOLS);
             jebp_int dist = jebp__read_symbol(ctx, &group->dist);
             dist = jebp__read_vp8l_extrabits(ctx, dist);
             if (dist > JEBP__NB_VP8L_OFFSETS) {
@@ -872,43 +899,50 @@ static void jebp__read_subimage(jebp__context_t *ctx, jebp__subimage_t *image) {
  */
 #define JEBP__NB_VP8L_PREDICTIONS 14
 
-typedef void (*jebp__vp8l_predict_t)(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t);
+typedef void (*jebp__vp8l_predict_t)(jebp_color_t *p, jebp_color_t *l,
+                                     jebp_color_t *t);
 
 static JEBP__INLINE void jebp__vp8l_predict_black(jebp_color_t *p) {
     p->a += 0xff;
 }
 
-static void jebp__vp8l_predict0(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict0(jebp_color_t *p, jebp_color_t *l,
+                                jebp_color_t *t) {
     (void)l;
     (void)t;
     jebp__vp8l_predict_black(p);
 }
 
-static JEBP__INLINE void jebp__vp8l_predict_left(jebp_color_t *p, jebp_color_t *l) {
+static JEBP__INLINE void jebp__vp8l_predict_left(jebp_color_t *p,
+                                                 jebp_color_t *l) {
     p->r += l->r;
     p->g += l->g;
     p->b += l->b;
     p->a += l->a;
 }
 
-static void jebp__vp8l_predict1(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict1(jebp_color_t *p, jebp_color_t *l,
+                                jebp_color_t *t) {
     (void)t;
     jebp__vp8l_predict_left(p, l);
 }
 
-static JEBP__INLINE void jebp__vp8l_predict_top(jebp_color_t *p, jebp_color_t *t) {
+static JEBP__INLINE void jebp__vp8l_predict_top(jebp_color_t *p,
+                                                jebp_color_t *t) {
     p->r += t->r;
     p->g += t->g;
     p->b += t->b;
     p->a += t->a;
 }
 
-static void jebp__vp8l_predict2(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict2(jebp_color_t *p, jebp_color_t *l,
+                                jebp_color_t *t) {
     (void)l;
     jebp__vp8l_predict_top(p, t);
 }
 
-static void jebp__vp8l_predict3(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict3(jebp_color_t *p, jebp_color_t *l,
+                                jebp_color_t *t) {
     (void)l;
     p->r += t[1].r;
     p->g += t[1].g;
@@ -916,7 +950,8 @@ static void jebp__vp8l_predict3(jebp_color_t *p, jebp_color_t *l, jebp_color_t *
     p->a += t[1].a;
 }
 
-static void jebp__vp8l_predict4(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict4(jebp_color_t *p, jebp_color_t *l,
+                                jebp_color_t *t) {
     (void)l;
     p->r += t[-1].r;
     p->g += t[-1].g;
@@ -924,28 +959,32 @@ static void jebp__vp8l_predict4(jebp_color_t *p, jebp_color_t *l, jebp_color_t *
     p->a += t[-1].a;
 }
 
-static void jebp__vp8l_predict5(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict5(jebp_color_t *p, jebp_color_t *l,
+                                jebp_color_t *t) {
     p->r += JEBP__AVG(JEBP__AVG(l->r, t[1].r), t->r);
     p->g += JEBP__AVG(JEBP__AVG(l->g, t[1].g), t->g);
     p->b += JEBP__AVG(JEBP__AVG(l->b, t[1].b), t->b);
     p->a += JEBP__AVG(JEBP__AVG(l->a, t[1].a), t->a);
 }
 
-static void jebp__vp8l_predict6(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict6(jebp_color_t *p, jebp_color_t *l,
+                                jebp_color_t *t) {
     p->r += JEBP__AVG(l->r, t[-1].r);
     p->g += JEBP__AVG(l->g, t[-1].g);
     p->b += JEBP__AVG(l->b, t[-1].b);
     p->a += JEBP__AVG(l->a, t[-1].a);
 }
 
-static void jebp__vp8l_predict7(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict7(jebp_color_t *p, jebp_color_t *l,
+                                jebp_color_t *t) {
     p->r += JEBP__AVG(l->r, t->r);
     p->g += JEBP__AVG(l->g, t->g);
     p->b += JEBP__AVG(l->b, t->b);
     p->a += JEBP__AVG(l->a, t->a);
 }
 
-static void jebp__vp8l_predict8(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict8(jebp_color_t *p, jebp_color_t *l,
+                                jebp_color_t *t) {
     (void)l;
     p->r += JEBP__AVG(t[-1].r, t->r);
     p->g += JEBP__AVG(t[-1].g, t->g);
@@ -953,7 +992,8 @@ static void jebp__vp8l_predict8(jebp_color_t *p, jebp_color_t *l, jebp_color_t *
     p->a += JEBP__AVG(t[-1].a, t->a);
 }
 
-static void jebp__vp8l_predict9(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict9(jebp_color_t *p, jebp_color_t *l,
+                                jebp_color_t *t) {
     (void)l;
     p->r += JEBP__AVG(t->r, t[1].r);
     p->g += JEBP__AVG(t->g, t[1].g);
@@ -961,18 +1001,23 @@ static void jebp__vp8l_predict9(jebp_color_t *p, jebp_color_t *l, jebp_color_t *
     p->a += JEBP__AVG(t->a, t[1].a);
 }
 
-static void jebp__vp8l_predict10(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict10(jebp_color_t *p, jebp_color_t *l,
+                                 jebp_color_t *t) {
     p->r += JEBP__AVG(JEBP__AVG(l->r, t[-1].r), JEBP__AVG(t->r, t[1].r));
     p->g += JEBP__AVG(JEBP__AVG(l->g, t[-1].g), JEBP__AVG(t->g, t[1].g));
     p->b += JEBP__AVG(JEBP__AVG(l->b, t[-1].b), JEBP__AVG(t->b, t[1].b));
     p->a += JEBP__AVG(JEBP__AVG(l->a, t[-1].a), JEBP__AVG(t->a, t[1].a));
 }
 
-static JEBP__INLINE jebp_int jebp__vp8l_predict_dist(jebp_color_t *c, jebp_int pr, jebp_int pg, jebp_int pb, jebp_int pa) {
-    return JEBP__ABS(pr - c->r) + JEBP__ABS(pg - c->g) + JEBP__ABS(pb - c->b) + JEBP__ABS(pa - c->a);
+static JEBP__INLINE jebp_int jebp__vp8l_predict_dist(jebp_color_t *c,
+                                                     jebp_int pr, jebp_int pg,
+                                                     jebp_int pb, jebp_int pa) {
+    return JEBP__ABS(pr - c->r) + JEBP__ABS(pg - c->g) + JEBP__ABS(pb - c->b) +
+           JEBP__ABS(pa - c->a);
 }
 
-static void jebp__vp8l_predict11(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict11(jebp_color_t *p, jebp_color_t *l,
+                                 jebp_color_t *t) {
     jebp_int pr = l->r + t->r - t[-1].r;
     jebp_int pg = l->g + t->g - t[-1].g;
     jebp_int pb = l->b + t->b - t[-1].b;
@@ -986,48 +1031,39 @@ static void jebp__vp8l_predict11(jebp_color_t *p, jebp_color_t *l, jebp_color_t 
     }
 }
 
-static void jebp__vp8l_predict12(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
+static void jebp__vp8l_predict12(jebp_color_t *p, jebp_color_t *l,
+                                 jebp_color_t *t) {
     p->r += JEBP__CLAMP_COLOR(l->r + t->r - t[-1].r);
     p->g += JEBP__CLAMP_COLOR(l->g + t->g - t[-1].g);
     p->b += JEBP__CLAMP_COLOR(l->b + t->b - t[-1].b);
     p->a += JEBP__CLAMP_COLOR(l->a + t->a - t[-1].a);
 }
 
-static void jebp__vp8l_predict13(jebp_color_t *p, jebp_color_t *l, jebp_color_t *t) {
-    jebp_color_t avg = {
-        JEBP__AVG(l->r, t->r),
-        JEBP__AVG(l->g, t->g),
-        JEBP__AVG(l->b, t->b),
-        JEBP__AVG(l->a, t->a)
-    };
+static void jebp__vp8l_predict13(jebp_color_t *p, jebp_color_t *l,
+                                 jebp_color_t *t) {
+    jebp_color_t avg = {JEBP__AVG(l->r, t->r), JEBP__AVG(l->g, t->g),
+                        JEBP__AVG(l->b, t->b), JEBP__AVG(l->a, t->a)};
     p->r += JEBP__CLAMP_COLOR(avg.r + (avg.r - t[-1].r) / 2);
     p->g += JEBP__CLAMP_COLOR(avg.g + (avg.g - t[-1].g) / 2);
     p->b += JEBP__CLAMP_COLOR(avg.b + (avg.b - t[-1].b) / 2);
     p->a += JEBP__CLAMP_COLOR(avg.a + (avg.a - t[-1].a) / 2);
 }
 
-static jebp__vp8l_predict_t jebp__vp8l_predictions[JEBP__NB_VP8L_PREDICTIONS] = {
-    jebp__vp8l_predict0,
-    jebp__vp8l_predict1,
-    jebp__vp8l_predict2,
-    jebp__vp8l_predict3,
-    jebp__vp8l_predict4,
-    jebp__vp8l_predict5,
-    jebp__vp8l_predict6,
-    jebp__vp8l_predict7,
-    jebp__vp8l_predict8,
-    jebp__vp8l_predict9,
-    jebp__vp8l_predict10,
-    jebp__vp8l_predict11,
-    jebp__vp8l_predict12,
-    jebp__vp8l_predict13,
+static jebp__vp8l_predict_t jebp__vp8l_predictions[JEBP__NB_VP8L_PREDICTIONS] =
+    {
+        jebp__vp8l_predict0,  jebp__vp8l_predict1,  jebp__vp8l_predict2,
+        jebp__vp8l_predict3,  jebp__vp8l_predict4,  jebp__vp8l_predict5,
+        jebp__vp8l_predict6,  jebp__vp8l_predict7,  jebp__vp8l_predict8,
+        jebp__vp8l_predict9,  jebp__vp8l_predict10, jebp__vp8l_predict11,
+        jebp__vp8l_predict12, jebp__vp8l_predict13,
 };
 
 /**
  * VP8L transforms
  */
 // returns 0 if there are no more transforms to read
-static jebp_int jebp__read_transform(jebp__context_t *ctx, jebp__transform_t *transform) {
+static jebp_int jebp__read_transform(jebp__context_t *ctx,
+                                     jebp__transform_t *transform) {
     if (!jebp__read_bits(ctx, 1)) {
         // no more transforms to read
         transform->type = JEBP__TRANSFORM_NONE;
@@ -1046,7 +1082,8 @@ static jebp_int jebp__read_transform(jebp__context_t *ctx, jebp__transform_t *tr
     return 1;
 }
 
-static JEBP__INLINE void jebp__apply_predict_transform(jebp__context_t *ctx, jebp__subimage_t *image) {
+static JEBP__INLINE void
+jebp__apply_predict_transform(jebp__context_t *ctx, jebp__subimage_t *image) {
     JEBP__LOOP_IMAGE(ctx->image) {
         jebp_color_t *l = pixel - 1;
         jebp_color_t *t = pixel - ctx->image->width;
@@ -1060,7 +1097,8 @@ static JEBP__INLINE void jebp__apply_predict_transform(jebp__context_t *ctx, jeb
             // Use top prediction for left row
             jebp__vp8l_predict_top(pixel, t);
         } else {
-            jebp_int predict = jebp__index_subimage(ctx->image, pixel, image)->g;
+            jebp_int predict =
+                jebp__index_subimage(ctx->image, pixel, image)->g;
             if (predict >= JEBP__NB_VP8L_PREDICTIONS) {
                 JEBP__ERROR(INVDATA);
             }
@@ -1070,11 +1108,13 @@ static JEBP__INLINE void jebp__apply_predict_transform(jebp__context_t *ctx, jeb
     }
 }
 
-static JEBP__INLINE jebp_ubyte jebp__apply_color_delta(jebp_ubyte color, jebp_ubyte delta) {
+static JEBP__INLINE jebp_ubyte jebp__apply_color_delta(jebp_ubyte color,
+                                                       jebp_ubyte delta) {
     return (jebp_ubyte)(((jebp_byte)color * (jebp_byte)delta) >> 5);
 }
 
-static JEBP__INLINE void jebp__apply_color_transform(jebp__context_t *ctx, jebp__subimage_t *image) {
+static JEBP__INLINE void jebp__apply_color_transform(jebp__context_t *ctx,
+                                                     jebp__subimage_t *image) {
     JEBP__LOOP_IMAGE(ctx->image) {
         jebp_color_t *delta = jebp__index_subimage(ctx->image, pixel, image);
         pixel->r += jebp__apply_color_delta(pixel->g, delta->b);
@@ -1092,7 +1132,8 @@ static JEBP__INLINE void jebp__apply_green_transform(jebp__context_t *ctx) {
     }
 }
 
-static void jebp__apply_transform(jebp__context_t *ctx, jebp__transform_t *transform) {
+static void jebp__apply_transform(jebp__context_t *ctx,
+                                  jebp__transform_t *transform) {
     switch (transform->type) {
     case JEBP__TRANSFORM_NONE:
         break;
@@ -1173,8 +1214,7 @@ static const char *jebp__error_strings[JEBP_NB_ERRORS] = {
     "Feature not supported",
     "Not enough memory",
     "I/O error",
-    "Unknown error"
-};
+    "Unknown error"};
 
 const char *jebp_error_string(jebp_error_t err) {
     if (err < 0 || err >= JEBP_NB_ERRORS) {
@@ -1190,7 +1230,8 @@ void jebp_free_image(jebp_image_t *image) {
     }
 }
 
-static void jebp__memory_context(jebp__context_t *ctx, jebp_image_t *image, size_t size, const void *data) {
+static void jebp__memory_context(jebp__context_t *ctx, jebp_image_t *image,
+                                 size_t size, const void *data) {
     JEBP__CLEAR(ctx, sizeof(jebp__context_t));
     ctx->image = image;
     ctx->nb_bytes = size;
@@ -1219,7 +1260,8 @@ static jebp_error_t jebp__read_size(jebp__context_t *ctx) {
     return JEBP_OK;
 }
 
-jebp_error_t jebp_decode_size(jebp_image_t *image, size_t size, const void *data) {
+jebp_error_t jebp_decode_size(jebp_image_t *image, size_t size,
+                              const void *data) {
     if (image == NULL || data == NULL) {
         return JEBP_ERROR_INVAL;
     }
@@ -1260,7 +1302,8 @@ jebp_error_t jebp_decode(jebp_image_t *image, size_t size, const void *data) {
 }
 
 #ifndef JEBP_NO_STDIO
-static jebp_error_t jebp__file_context(jebp__context_t *ctx, jebp_image_t *image, const char *path) {
+static jebp_error_t jebp__file_context(jebp__context_t *ctx,
+                                       jebp_image_t *image, const char *path) {
     JEBP__CLEAR(ctx, sizeof(jebp__context_t));
     ctx->image = image;
     ctx->file = fopen(path, "rb");

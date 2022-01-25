@@ -1,7 +1,6 @@
 #include <errno.h>
 #define JEBP_NO_STDIO
 #undef JEBP_LOG_ERRORS
-#pragma GCC diagnostic ignored "-Wgnu-include-next"
 #include "test_util.h"
 #define JEBP_IMPLEMENTATION
 #include "../jebp.h"

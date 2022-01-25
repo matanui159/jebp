@@ -5,7 +5,6 @@ static void test_free(void *ptr);
 
 #define JEBP_ALLOC test_alloc
 #define JEBP_FREE test_free
-#pragma GCC diagnostic ignored "-Wgnu-include-next"
 #include "test_util.h"
 #define JEBP_IMPLEMENTATION
 #include "../jebp.h"

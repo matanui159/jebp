@@ -1,8 +1,9 @@
 #ifndef TEST_UTIL_H
 #define TEST_UTIL_H
-#include <stdlib.h>
-#include <stdio.h>
+#pragma GCC diagnostic ignored "-Wgnu-include-next"
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #define TEST_INVALID_HEADERS
 #include "../jebp.h"
