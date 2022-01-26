@@ -22,8 +22,8 @@ jobs:
       - if: matrix.os == 'ubuntu-latest'
         name: Install Ninja
         run: |
-          apt-get update
-          apt-get install ninja
+          sudo apt-get update
+          sudo apt-get install ninja
       - name: Setup project
         run: meson setup bin --buildtype release --werror --backend ${{ matrix.backend }}
       - name: Compile project
@@ -43,8 +43,8 @@ jobs:
         run: pip3 install meson
       - name: Install Ninja
         run: |
-          apt-get update
-          apt-get install ninja
+          sudo apt-get update
+          sudo apt-get install ninja
       - name: Setup project
         run: meson setup bin
       - name: Format code
