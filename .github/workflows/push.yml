@@ -5,7 +5,7 @@ jobs:
   build:
     strategy:
       matrix:
-        includes:
+        include:
           - name: Ubuntu GCC
             os: ubuntu-latest
             backend: ninja
@@ -23,7 +23,7 @@ jobs:
         name: Install Ninja
         run: |
           sudo apt-get update
-          sudo apt-get install ninja
+          sudo apt-get install ninja-build
       - name: Setup project
         run: meson setup bin --buildtype release --werror --backend ${{ matrix.backend }}
       - name: Compile project
@@ -44,7 +44,7 @@ jobs:
       - name: Install Ninja
         run: |
           sudo apt-get update
-          sudo apt-get install ninja
+          sudo apt-get install ninja-build
       - name: Setup project
         run: meson setup bin
       - name: Format code
