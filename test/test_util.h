@@ -1,15 +1,14 @@
 #ifndef TEST_UTIL_H
 #define TEST_UTIL_H
-#ifdef __clang__
-#pragma GCC diagnostic ignored "-Wgnu-include-next"
-#else
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #define TEST_INVALID_HEADERS
+// On some platforms SIMD-headers import system headers
+#ifndef JEBP_NO_SIMD
+#define JEBP_NO_SIMD
+#endif
 #include "../jebp.h"
 
 // Largest string is "16384x16384\0"

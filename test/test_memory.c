@@ -1,6 +1,5 @@
 #include <errno.h>
 #define JEBP_NO_STDIO
-#define JEBP_NO_SIMD // On some platforms SIMD-headers import system headers
 #undef JEBP_LOG_ERRORS
 #include "test_util.h"
 #define JEBP_IMPLEMENTATION
@@ -19,7 +18,9 @@ int main(int argc, char **argv) {
         test_error("Out of memory");
     }
     fseek(file, 0, SEEK_SET);
-    fread(data, 1, size, file);
+    if (fread(data, 1, size, file) < size) {
+        test_error("Failed to read file");
+    }
     fclose(file);
 
     jebp_image_t image;

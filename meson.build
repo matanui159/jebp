@@ -34,15 +34,18 @@ endif
 test_file = executable(
     'test_file', 'test/test_file.c',
     c_args: c_args,
+    override_options: ['werror=false']
 )
 test_memory = executable(
     'test_memory', 'test/test_memory.c',
     c_args: c_args,
+    override_options: ['werror=false'],
     include_directories: 'test/sys/stdio'
 )
 test_alloc = executable(
     'test_alloc', 'test/test_alloc.c',
     c_args: c_args,
+    override_options: ['werror=false'],
     include_directories: 'test/sys/stdlib'
 )
 tests = [
