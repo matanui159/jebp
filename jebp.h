@@ -241,12 +241,13 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 // We don't add GCC version checks since, unlike __has_builtin, __has_attribute
 // has been out for so long that its more likely that the compiler supports it.
 #if JEBP__HAS_ATTRIBUTE(always_inline)
-#define JEBP__INLINE __attribute__((always_inline))
+#define JEBP__ALWAYS_INLINE __attribute__((always_inline))
 #elif defined(_MSC_VER)
-#define JEBP__INLINE __forceinline
+#define JEBP__ALWAYS_INLINE __forceinline
 #else
-#define JEBP__INLINE inline
+#define JEBP__ALWAYS_INLINE
 #endif
+#define JEBP__INLINE static inline JEBP__ALWAYS_INLINE
 
 #ifdef __has_builtin
 #define JEBP__HAS_BUILTIN __has_builtin
@@ -390,10 +391,9 @@ typedef struct jebp__context_t {
 /**
  * Common utilities
  */
-static JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
-                                                    jebp_error_t error,
-                                                    const char *file,
-                                                    jebp_int line) {
+JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
+                                             jebp_error_t error,
+                                             const char *file, jebp_int line) {
 #ifdef JEBP_LOG_ERRORS
     fprintf(stderr, "%s:%i: %s\n", file, line, jebp_error_string(error));
 #else  // JEBP_LOG_ERRORS
@@ -761,9 +761,9 @@ static jebp_int jebp__read_colcache(jebp__context_t *ctx) {
     }
 }
 
-static JEBP__INLINE void jebp__colcache_insert(jebp__context_t *ctx,
-                                               jebp_color_t *color,
-                                               jebp_int colcache_bits) {
+JEBP__INLINE void jebp__colcache_insert(jebp__context_t *ctx,
+                                        jebp_color_t *color,
+                                        jebp_int colcache_bits) {
     if (colcache_bits == 0) {
         return;
     }
@@ -783,8 +783,8 @@ static JEBP__INLINE void jebp__colcache_insert(jebp__context_t *ctx,
     ctx->colcache[hash] = *color;
 }
 
-static JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx,
-                                                       jebp_int symbol) {
+JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx,
+                                                jebp_int symbol) {
     if (symbol < 4) {
         return symbol + 1;
     }
@@ -793,9 +793,9 @@ static JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx,
     return symbol + jebp__read_bits(ctx, extrabits);
 }
 
-static JEBP__INLINE jebp_color_t *
-jebp__index_subimage(jebp_image_t *image, jebp_color_t *pixel,
-                     jebp__subimage_t *subimage) {
+JEBP__INLINE jebp_color_t *jebp__index_subimage(jebp_image_t *image,
+                                                jebp_color_t *pixel,
+                                                jebp__subimage_t *subimage) {
     jebp_int i = (jebp_int)(pixel - image->pixels);
     jebp_int x = i % image->width;
     jebp_int y = i / image->width;
@@ -908,7 +908,7 @@ static void jebp__read_subimage(jebp__context_t *ctx, jebp__subimage_t *image) {
 typedef void (*jebp__vp8l_predict_t)(jebp_color_t *p, jebp_color_t *l,
                                      jebp_color_t *t);
 
-static JEBP__INLINE void jebp__vp8l_predict_black(jebp_color_t *p) {
+JEBP__INLINE void jebp__vp8l_predict_black(jebp_color_t *p) {
     p->a += 0xff;
 }
 
@@ -919,8 +919,7 @@ static void jebp__vp8l_predict0(jebp_color_t *p, jebp_color_t *l,
     jebp__vp8l_predict_black(p);
 }
 
-static JEBP__INLINE void jebp__vp8l_predict_left(jebp_color_t *p,
-                                                 jebp_color_t *l) {
+JEBP__INLINE void jebp__vp8l_predict_left(jebp_color_t *p, jebp_color_t *l) {
     p->r += l->r;
     p->g += l->g;
     p->b += l->b;
@@ -933,8 +932,7 @@ static void jebp__vp8l_predict1(jebp_color_t *p, jebp_color_t *l,
     jebp__vp8l_predict_left(p, l);
 }
 
-static JEBP__INLINE void jebp__vp8l_predict_top(jebp_color_t *p,
-                                                jebp_color_t *t) {
+JEBP__INLINE void jebp__vp8l_predict_top(jebp_color_t *p, jebp_color_t *t) {
     p->r += t->r;
     p->g += t->g;
     p->b += t->b;
@@ -1015,9 +1013,9 @@ static void jebp__vp8l_predict10(jebp_color_t *p, jebp_color_t *l,
     p->a += JEBP__AVG(JEBP__AVG(l->a, t[-1].a), JEBP__AVG(t->a, t[1].a));
 }
 
-static JEBP__INLINE jebp_int jebp__vp8l_predict_dist(jebp_color_t *c,
-                                                     jebp_int pr, jebp_int pg,
-                                                     jebp_int pb, jebp_int pa) {
+JEBP__INLINE jebp_int jebp__vp8l_predict_dist(jebp_color_t *c, jebp_int pr,
+                                              jebp_int pg, jebp_int pb,
+                                              jebp_int pa) {
     return JEBP__ABS(pr - c->r) + JEBP__ABS(pg - c->g) + JEBP__ABS(pb - c->b) +
            JEBP__ABS(pa - c->a);
 }
@@ -1088,8 +1086,8 @@ static jebp_int jebp__read_transform(jebp__context_t *ctx,
     return 1;
 }
 
-static JEBP__INLINE void
-jebp__apply_predict_transform(jebp__context_t *ctx, jebp__subimage_t *image) {
+JEBP__INLINE void jebp__apply_predict_transform(jebp__context_t *ctx,
+                                                jebp__subimage_t *image) {
     JEBP__LOOP_IMAGE(ctx->image) {
         jebp_color_t *l = pixel - 1;
         jebp_color_t *t = pixel - ctx->image->width;
@@ -1114,13 +1112,13 @@ jebp__apply_predict_transform(jebp__context_t *ctx, jebp__subimage_t *image) {
     }
 }
 
-static JEBP__INLINE jebp_ubyte jebp__apply_color_delta(jebp_ubyte color,
-                                                       jebp_ubyte delta) {
+JEBP__INLINE jebp_ubyte jebp__apply_color_delta(jebp_ubyte color,
+                                                jebp_ubyte delta) {
     return (jebp_ubyte)(((jebp_byte)color * (jebp_byte)delta) >> 5);
 }
 
-static JEBP__INLINE void jebp__apply_color_transform(jebp__context_t *ctx,
-                                                     jebp__subimage_t *image) {
+JEBP__INLINE void jebp__apply_color_transform(jebp__context_t *ctx,
+                                              jebp__subimage_t *image) {
     JEBP__LOOP_IMAGE(ctx->image) {
         jebp_color_t *delta = jebp__index_subimage(ctx->image, pixel, image);
         pixel->r += jebp__apply_color_delta(pixel->g, delta->b);
@@ -1130,7 +1128,7 @@ static JEBP__INLINE void jebp__apply_color_transform(jebp__context_t *ctx,
     }
 }
 
-static JEBP__INLINE void jebp__apply_green_transform(jebp__context_t *ctx) {
+JEBP__INLINE void jebp__apply_green_transform(jebp__context_t *ctx) {
     JEBP__LOOP_IMAGE(ctx->image) {
         pixel->r += pixel->g;
         pixel->b += pixel->g;
