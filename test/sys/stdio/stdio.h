@@ -1,5 +1,7 @@
-#ifdef TEST_INVALID_HEADERS
+#if defined(TEST_INVALID_HEADERS)
 #error stdio was included
-#else
+#elif defined(__GNUC__)
 #include_next <stdio.h>
+#else
+#include <../include/stdio.h>
 #endif

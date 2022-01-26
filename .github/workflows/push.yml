@@ -30,7 +30,7 @@ jobs:
       - name: Setup project
         run: meson setup bin --buildtype release --werror --backend ${{ matrix.backend }}
       - name: Compile project
-        run: meson compile
+        run: meson compile --verbose
         working-directory: bin
       - name: Run tests
         run: meson test
