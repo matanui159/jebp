@@ -145,6 +145,8 @@ extern "C" {
 #include <limits.h>
 #include <stddef.h>
 
+// TODO: -Wconversion used to be enabled which caused alot of issues I tried
+//       to fix. This is now disabled, so maybe those "fixes" could be cleaned up
 typedef signed char jebp_byte;
 typedef unsigned char jebp_ubyte;
 #if UINT_MAX >= 0xffffffff
@@ -769,9 +771,12 @@ static JEBP__INLINE void jebp__colcache_insert(jebp__context_t *ctx,
     hash = JEBP__SWAP32(hash);            // RGBA
     hash = (hash >> 8) | (hash << 24);    // ARGB
 #else
+    // Different versions of clang-format disagree over what to do with this
+    // clang-format off
     jebp_uint hash =
         (jebp_uint)((color->a << 24) |
                     ((color->r << 16) | (color->g << 8) | color->b));
+    // clang-format on
 #endif
     hash = (0x1e35a7bd * hash) >> (32 - colcache_bits);
     ctx->colcache[hash] = *color;

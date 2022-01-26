@@ -1,5 +1,6 @@
 #include <errno.h>
 #define JEBP_NO_STDIO
+#define JEBP_NO_SIMD // On some platforms SIMD-headers import system headers
 #undef JEBP_LOG_ERRORS
 #include "test_util.h"
 #define JEBP_IMPLEMENTATION

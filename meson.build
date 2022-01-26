@@ -3,12 +3,7 @@ project('jebp', 'c', default_options: [
     'warning_level=3'
 ])
 
-cc = meson.get_compiler('c')
-c_args = cc.get_supported_arguments(
-    '-Wconversion',
-    '-Wstrict-prototypes',
-    '-Wmissing-prototypes'
-)
+c_args = []
 if not get_option('jebp_simd')
     c_args += ['-DJEBP_NO_SIMD']
 endif

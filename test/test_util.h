@@ -1,6 +1,10 @@
 #ifndef TEST_UTIL_H
 #define TEST_UTIL_H
+#ifdef __clang__
 #pragma GCC diagnostic ignored "-Wgnu-include-next"
+#else
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -5,6 +5,7 @@ static void test_free(void *ptr);
 
 #define JEBP_ALLOC test_alloc
 #define JEBP_FREE test_free
+#define JEBP_NO_SIMD // On some platforms SIMD-headers import system headers
 #include "test_util.h"
 #define JEBP_IMPLEMENTATION
 #include "../jebp.h"
