@@ -1,0 +1,54 @@
+name: On Push
+on: [push, pull_request]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        includes:
+          - name: Ubuntu GCC
+            os: ubuntu-latest
+            backend: ninja
+          - name: Windows MSVC
+            os: windows-latest
+            backend: vs
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Install Meson
+        run: pip3 install meson
+      - if: matrix.os == ubuntu-latest
+        name: Install Ninja
+        run: |
+          apt-get update
+          apt-get install ninja
+      - name: Setup project
+        run: meson setup bin --buildtype release --werror --backend ${{ matrix.backend }}
+      - name: Compile project
+        run: meson compile
+        working-directory: bin
+      - name: Run tests
+        run: meson test
+        working-directory: bin
+
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Install Meson
+        run: pip3 install meson
+      - name: Install Ninja
+        run: |
+          apt-get update
+          apt-get install ninja
+      - name: Setup project
+        run: meson setup bin
+      - name: Format code
+        run: ninja clang-format
+        working-directory: bin
+      - name: Check for differences
+        run: git diff --exit-code --color
