@@ -146,7 +146,8 @@ extern "C" {
 #include <stddef.h>
 
 // TODO: -Wconversion used to be enabled which caused alot of issues I tried
-//       to fix. This is now disabled, so maybe those "fixes" could be cleaned up
+//       to fix. This is now disabled, so maybe those "fixes" could be cleaned
+//       up
 typedef signed char jebp_byte;
 typedef unsigned char jebp_ubyte;
 #if UINT_MAX >= 0xffffffff
