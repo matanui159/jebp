@@ -30,10 +30,10 @@ jobs:
       - name: Setup project
         run: >
           meson setup bin
-            --buildtype release
-            --werror
-            --backend ${{ matrix.backend }}
-            -Djebp_test=true
+          --buildtype release
+          --werror
+          --backend ${{ matrix.backend }}
+          -Djebp_test=true
       - name: Compile project
         run: meson compile --verbose
         working-directory: bin
