@@ -717,8 +717,11 @@ static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman,
                 repeat = jebp__read_bits(ctx, 7) + 11;
                 break;
             default:
-                ctx->lengths[i++] = symbol;
                 prev_length = symbol;
+                /* fallthrough */
+            case 0:
+                // We don't ever repeat 0 values.
+                ctx->lengths[i++] = symbol;
                 continue;
             }
             for (jebp_int j = 0; i < nb_lengths && j < repeat; j += 1) {
@@ -1213,7 +1216,7 @@ static void jebp__read_vp8l(jebp__context_t *ctx) {
 /**
  * Public API
  */
-static const char *jebp__error_strings[JEBP_NB_ERRORS] = {
+static const char *const jebp__error_strings[JEBP_NB_ERRORS] = {
     "Ok",
     "Invalid value or argument",
     "Invalid data or corrupted file",

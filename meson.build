@@ -31,43 +31,45 @@ endif
 ##
 # Tests
 ##
-test_file = executable(
-    'test_file', 'test/test_file.c',
-    c_args: c_args,
-    override_options: ['werror=false']
-)
-test_memory = executable(
-    'test_memory', 'test/test_memory.c',
-    c_args: c_args,
-    override_options: ['werror=false'],
-    include_directories: 'test/sys/stdio'
-)
-test_alloc = executable(
-    'test_alloc', 'test/test_alloc.c',
-    c_args: c_args,
-    override_options: ['werror=false'],
-    include_directories: 'test/sys/stdlib'
-)
-tests = [
-    { 'name': 'lossless-rose', 'file': 'test/lossless/rose.webp', 'size': '400x301', 'hash': '9f24f39d' },
-    # { 'name': 'lossless-tux', 'file': 'test/lossless/tux.webp', 'size': '386x395', 'hash': '0' },
-    { 'name': 'lossless-dice', 'file': 'test/lossless/dice.webp', 'size': '800x600', 'hash': 'cb524cc8' },
-    # { 'name': 'lossless-compass', 'file': 'test/lossless/compass.webp', 'size': '300x300', 'hash': '0' }
-]
-foreach test : tests
-    test(
-        'file-'+test['name'], test_file,
-        args: [test['file'], test['size'], test['hash']],
-        workdir: meson.current_source_dir()
+if get_option('jebp_test')
+    test_file = executable(
+        'test_file', 'test/test_file.c',
+        c_args: c_args,
+        override_options: ['werror=false']
     )
-    test(
-        'memory-'+test['name'], test_memory,
-        args: [test['file'], test['size'], test['hash']],
-        workdir: meson.current_source_dir()
+    test_memory = executable(
+        'test_memory', 'test/test_memory.c',
+        c_args: c_args,
+        override_options: ['werror=false'],
+        include_directories: 'test/sys/stdio'
     )
-    test(
-        'alloc-'+test['name'], test_memory,
-        args: [test['file'], test['size'], test['hash']],
-        workdir: meson.current_source_dir()
+    test_alloc = executable(
+        'test_alloc', 'test/test_alloc.c',
+        c_args: c_args,
+        override_options: ['werror=false'],
+        include_directories: 'test/sys/stdlib'
     )
-endforeach
+    tests = [
+        { 'name': 'lossless-rose', 'file': 'test/lossless/rose.webp', 'size': '400x301', 'hash': '9f24f39d' },
+        { 'name': 'lossless-tux', 'file': 'test/lossless/tux.webp', 'size': '386x395', 'hash': 'dd77ded2' },
+        { 'name': 'lossless-dice', 'file': 'test/lossless/dice.webp', 'size': '800x600', 'hash': 'cb524cc8' },
+        { 'name': 'lossless-compass', 'file': 'test/lossless/compass.webp', 'size': '300x300', 'hash': '6588b58e' }
+    ]
+    foreach test : tests
+        test(
+            'file-'+test['name'], test_file,
+            args: [test['file'], test['size'], test['hash']],
+            workdir: meson.current_source_dir()
+        )
+        test(
+            'memory-'+test['name'], test_memory,
+            args: [test['file'], test['size'], test['hash']],
+            workdir: meson.current_source_dir()
+        )
+        test(
+            'alloc-'+test['name'], test_memory,
+            args: [test['file'], test['size'], test['hash']],
+            workdir: meson.current_source_dir()
+        )
+    endforeach
+endif
