@@ -19,6 +19,9 @@ endif
 if not get_option('jebp_vp8l')
     c_args += ['-DJEBP_NO_VP8L']
 endif
+if build_machine.system() == 'windows'
+    c_args += ['-D_CRT_SECURE_NO_WARNINGS']
+endif
 sdl2 = dependency('sdl2', required: get_option('jebp_sdl2'))
 if sdl2.found()
     executable(

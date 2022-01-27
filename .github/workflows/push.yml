@@ -35,10 +35,10 @@ jobs:
           --backend ${{ matrix.backend }}
           -Djebp_test=true
       - name: Compile project
-        run: meson compile --verbose
+        run: meson compile
         working-directory: bin
       - name: Run tests
-        run: meson test
+        run: meson test --verbose
         working-directory: bin
 
   format:
