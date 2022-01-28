@@ -33,13 +33,12 @@ int main(int argc, char **argv) {
     if (argc != 2) {
         view_error("Usage: jebpview <WebP file>");
     }
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        view_error(SDL_GetError());
-    }
-
-    jebp_error_t err = jebp_read_size(&view_image, argv[1]);
+    jebp_error_t err = jebp_read(&view_image, argv[1]);
     if (err != JEBP_OK) {
         view_error(jebp_error_string(err));
+    }
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        view_error(SDL_GetError());
     }
 
     snprintf(view_title, VIEW_TITLE_SIZE, "jebpview - %s", argv[1]);
