@@ -885,6 +885,9 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image,
             }
             jebp_color_t *repeat = pixel - dist;
             jebp_color_t *repeat_end = repeat + length;
+            if (repeat < image->pixels || repeat_end >= end) {
+                JEBP__ERROR(INVDATA);
+            }
             while (pixel != end && repeat != repeat_end) {
                 jebp__colcache_insert(ctx, repeat, colcache_bits);
                 *(pixel++) = *(repeat++);
