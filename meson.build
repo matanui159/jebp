@@ -8,10 +8,10 @@ if not get_option('jebp_simd')
     c_args += ['-DJEBP_NO_SIMD']
 endif
 jebp_log_errors = get_option('jebp_log_errors')
-if jebp_log_errors.enabled()
-    log_errors = true
-elif jebp_log_errors.auto()
+if jebp_log_errors.auto()
     log_errors = get_option('debug')
+else
+    log_errors = jebp_log_errors.enabled()
 endif
 if log_errors
     c_args += ['-DJEBP_LOG_ERRORS']
@@ -32,7 +32,7 @@ if sdl2.found()
 endif
 
 ##
-# Tests
+# E2E tests
 ##
 if get_option('jebp_test')
     test_file = executable(
@@ -75,4 +75,19 @@ if get_option('jebp_test')
             workdir: meson.current_source_dir()
         )
     endforeach
+endif
+
+##
+# Fuzz testing
+##
+if get_option('jebp_fuzz')
+    fuzz = executable(
+        'fuzz', 'fuzz/fuzz.c',
+        c_args: c_args + ['-fsanitize=fuzzer'],
+        link_args: ['-fsanitize=fuzzer']
+    )
+    run_target(
+        'fuzz-test',
+        command: [fuzz, '@CURRENT_SOURCE_DIR@fuzz/corpus', '@CURRENT_SOURCE_DIR@test/lossless']
+    )
 endif

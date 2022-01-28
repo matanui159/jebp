@@ -5,6 +5,9 @@
 # IDE files
 /.vscode/
 
-# Mac files
+# OS files
 .DS_Store
-*.dSYM/
+
+# Fuzzing
+*.log
+crash-*
