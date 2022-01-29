@@ -131,7 +131,227 @@
 /**
  * DOCUMENTATION
  **
- * Todo lmao
+ * First and foremost, this project uses some custom types:
+ *   `jebp_byte`/`jebp_ubyte` is a singular byte.
+ *   `jebp_int`/`jebp_uint` is an integer of atleast 32-bits.
+ *
+ * This is a header only file. This means that it operates as a standard header
+ * and to generate the source file you define `JEBP_IMPLEMENTATION` in ONE file
+ * only. For example:
+ * ```c
+ * #define JEBP_IMPLEMENTATION
+ * #include "jebp.h"
+ * ```
+ *
+ * The most basic API call in this library is:
+ * ```c
+ * err = jebp_decode(&image, size, data);
+ * ```
+ * where:
+ *   `jebp_image_t *image` is a pointer to an image structure to receive the
+ *                         decoded data.
+ *   `size_t size` is the size of the WebP-encoded data buffer.
+ *   `const void *data` is a pointer to the WebP encoded data buffer, `size`
+ *                      bytes large.
+ *   `jebp_error_t err` is the result of the operation (OK or an error code).
+ *
+ * For reading from a provided file path, this API call can be used instead:
+ * ```c
+ * err = jebp_read(&image, path);
+ * ```
+ * where:
+ *   `const char *path` is the path of the file to be read.
+ *
+ * It is currently not possible to read from a `FILE *` object.
+ * If you only want to get the size of the image without a full read, these
+ * functions can be used instead:
+ * ```c
+ * err = jebp_decode_size(&image, size, data);
+ * err = jebp_read_size(&image, path);
+ * ```
+ *
+ * The `jebp_image_t` structure has the following properties:
+ *   `jebp_int width` is the width of the image.
+ *   `jebp_int height` is the height of the image.
+ *   `jebp_color_t *pixels` is a pointer to an array pixels. Each `jebp_color_t`
+ *                          structure contains for `jebp_ubyte` values for `r`,
+ *                          `g`, `b` and `a`. This allows the `pixels` pointer
+ *                          to be cast to `jebp_ubyte *` to get an RGBA pixel
+ *                          buffer.
+ * The allocated data in the image can be free'd with:
+ * ```c
+ * jebp_free_image(&image);
+ * ```
+ * This function will also clear the structure, notably width and height will be
+ * set to 0.
+ *
+ * The `jebp_error_t` enumeration has the following values.
+ *   `JEBP_OK` means the operation completed successfully.
+ *   `JEBP_ERROR_INVAL` means one of the arguments provided is invalid, usually
+ *                      this refers to an NULL pointer.
+ *   `JEBP_ERROR_INVDATA` means the WebP-encoded data is invalid or corrupted.
+ *   `JEBP_ERROR_EOF` means the end of the file (or data buffer) was reached
+ *                    before the operation could successfully complete.
+ *   `JEBP_ERROR_NOSUP` means there is a feature in the WebP stream that is not
+ *                      currently supported (see below). This can also represent
+ *                      new features, versions or RIFF-chunks that were not in
+ *                      the specification when writing.
+ *   `JEBP_ERROR_NOMEM` means that a memory allocation failed, indicating that
+ *                      there is no more memory available.
+ *   `JEBP_ERROR_IO` represents any generic I/O error, usually from
+ *                   file-reading.
+ *   `JEBP_ERROR_UNKNOWN` means any unknown error. Currently this is only used
+ *                        when an unknown value is passed into
+ *                        `jebp_error_string`.
+ * To get a human-readable string of the error, the following function can be
+ * used:
+ * ```c
+ * const char *error = jebp_error_string(err);
+ * ```
+ *
+ * This is not a feature-complete WebP decoder and has the following
+ * limitations:
+ *   - Does not support decoding lossy files with VP8.
+ *   - Does not support extended file-formats with VP8X.
+ *   - Does not support VP8L lossless images with the color-indexing transform
+ *     (palleted images).
+ *   - Does not support VP8L images with more than 256 huffman groups. This is
+ *     an arbitrary limit to prevent bad images from using too much memory. In
+ *     theory, images requiring more groups should be very rare. This limit may
+ *     be increased in the future.
+ *
+ * Features that will probably never be supported due to complexity or API
+ * constraints:
+ *   - Decoding color profiles.
+ *   - Decoding metadata.
+ *   - Full color-indexing/palette support will be a bit of a mess, so don't
+ *     expect full support of that coming anytime soon. Simple color-indexing
+ *     support (more than 16 colors, skipping the need for bit-packing) is
+ *     definitely alot more do-able.
+ *
+ * Along with `JEBP_IMPLEMENTATION` defined above, there are a few other macros
+ * that can be defined to change how JebP operates:
+ *   `JEBP_NO_STDIO` will disable the file-reading API.
+ *   `JEBP_NO_SIMD` will disable SIMD optimizations. These are currently
+ *                  not-used but the detection is there ready for further work.
+ *   `JEBP_NO_VP8L` will disable VP8L (lossless) decoding support. Note that
+ *                  currently this will make all images fail since VP8L is the
+ *                  only supported codec right now.
+ *   `JEBP_ALLOC` and `JEBP_FREE` can be defined to functions for a custom
+ *                allocator. They either both have to be defined or neither
+ *                defined.
+ *   `JEBP_ERROR` can be defined to a custom error handling. JebP uses `longjmp`
+ *                to jump back to the top-level API function on error, to
+ *                simplify error handling and checking. This might not be
+ *                desirable for certain systems so this functions allows for an
+ *                alternative method. The provided function must not return and
+ *                should be marked as non-returning. It is recommended to exit
+ *                the program entirely since otherwise there may be a memory
+ *                leak. Alternatively it could be marked as unreachable to
+ *                improve performance and code-size. However, it should not need
+ *                to be said that THIS IS A VERY DUMB AND INSECURE IDEA so be
+ *                very careful.
+ *   `JEBP_LOG_ERRORS` will log a message to `stdout` as soon as an error occurs
+ *                     with the line-number it happened on. Note that this will
+ *                     include `stdio.h` even if `JEBP_NO_STDIO` is defined.
+ *
+ * This single-header library requires C99 to be supported. Along with this it
+ * requires the following headers from the system to successfully compile. Some
+ * of these can be disabled with the above macros:
+ *   `stddef.h` is used for the definition of the `size_t` type.
+ *   `limits.h` is used for the `UINT_MAX` macro to check the size of `int`. If
+ *              `int` is not 32-bits, `long` will be used for `jebp_int`
+ *              instead.
+ *   `string.h` is used for `memset` to clear out memory.
+ *   `stdio.h` is used for I/O support and logging errors. If `JEBP_NO_STDIO` is
+ *             defined and `JEBP_LOG_ERRORS` is not defined, this will not be
+ *             included.
+ *   `stdlib.h` is used for the default implementations of `JEBP_ALLOC`
+ *              and `JEBP_FREE`, using `malloc` and `free` respectively. If
+ *              those macros are already defined to something else, this will
+ *              not be included.
+ *   `setjmp.h` is used for the default implementation of `JEBP_ERROR`, using
+ *              `longjmp` and `setjmp`. If that macro is already defined, this
+ *              will not be included.
+ *   `emmintrin.h` and `arm_neon.h` is used for SIMD intrinsice. If
+ *                 `JEBP_NO_SIMD` is defined these will not be included.
+ *
+ * The following predefined macros are also used for compiler-feature, SIMD and
+ * endianness detection. These can be changed or modified before import to
+ * change JebP's detection logic:
+ *   `__STDC_VERSION__` is used to detect if the compiler supports C99 and also
+ *                      checks for C11 support to use `_Noreturn`.
+ *   `__has_attribute` and `__has_builtin` are used to detect the `noreturn` and
+ *                     `always_inline` attributes, along with the
+ *                     `__builtin_bswap32` builtin. Note that `__has_attribute`
+ *                     does not fallback to compiler-version checks since most
+ *                     compilers already support `__has_attribute`.
+ *   `__GNUC__` and `__GNUC_MINOR__` are used to detect if the compiler is GCC
+ *              (or GCC compatible) and what version of GCC it is. This, in
+ *              turn, is used to polyfill `__has_builtin` on older compilers
+ *              that may not support it.
+ *   `__clang__` is used to detect the Clang compiler. This is only used to set
+ *               the detected GCC version higher since Clang still marks itself
+ *               as GCC 4.2 by default. No Clang version detection is done.
+ *   `_MSC_VER` is used to detect the MSVC compiler. This is used to check
+ *              support for `__declspec(noreturn)`, `__forceinline` and
+ *              `_byteswap_ulong`. No MSVC version detection is done.
+ *   `__LITTLE_ENDIAN__` is used to check if the architecture is little-endian.
+ *                       Note that this is only checked either if the
+ *                       architecture cannot be detected or, in special cases,
+ *                       where there is not enough information from the
+ *                       architecture or compiler to detect endianness. Also
+ *                       note that big-endian and other more-obscure endian
+ *                       types are not detected. Little-endian is the only
+ *                       endianness detected and is used for optimization in a
+ *                       few areas. If the architecture is not little-endian or
+ *                       cannot be detected as such, a naive solution is used
+ *                       instead.
+ *   `_WIN32` is used to check if this is being compiled on Windows. Currently
+ *            this is only used for Neon support since Windows requires Neon
+ *            support to be present and MSVC does not provide any method of
+ *            detecting Neon support.
+ *   `__i386`, `__i386__` and `_M_IX86` are used to detect if this is being
+ *           compiled for IA-32 (also known as x86, x86-32 or i386). If one of
+ *           these are defined, it is also assumed that the architecture is
+ *           little-endian. `_M_IX86` is usually present on MSVC, while
+ *           the other two are usually present on most other compilers.
+ *   `__SSE2__` and `_M_IX86_FP` are used to detect SSE2 support on IA-32.
+ *              `_M_IX86`, which is usually present on MSVC, must equal 2 to
+ *              indicate that the code is being compiled for a SSE2-compatible
+ *              floating-point unit. `__SSE2__` is usually present on most other
+ *              compilers.
+ *   `__amd64`, `__amd64__` and `_M_AMD64` are used to detect if this is being
+ *            compiled for AMD64 (also known as x86-64). If one of these are
+ *            defined, it is also assumed that the architecture is little-endian
+ *            and that SSE2 is supported (which is required for AMD64 support).
+ *            `_M_AMD64` is usually present on MSVC, while the other two are
+ *            usually present on most other compilers.
+ *   `__arm`, `__arm__` and `_M_ARM` are used to detect if this is being
+ *            compiled for AArch32 (also known as arm32, armhf or AArch32). If
+ *            one of these are defined on Windows, it is also assumed that Neon
+ *            is supported (which is required for Windows). `_M_ARM` is usually
+ *            present on MSVC while the other two are usually present on most
+ *            other compilers.
+ *   `__ARM_NEON` is used to detect Neon support on AArch32. MSVC doesn't seem
+ *                to support this, but it is not required since Windows always
+ *                supports Neon.
+ *   `__aarch64`, `__aarch64__` and `_M_ARM64` are used to detect if this is
+ *                being compiled for AArch64 (also known as arm64). If one of
+ *                these are defined, it is also assumed that Neon is supported
+ *                (which is required for AArch64 support). `_M_ARM64` is usually
+ *                present on MSVC, while the other two are usually present on
+ *                most other compilers.
+ *   `__ARM_BIG_ENDIAN` is used to detect, on AArch/ARM architectures, if it is
+ *                      in big-endian mode. However, as mentioned above, there
+ *                      is no special code for big-endian and it's worth noting
+ *                      that this is just used to force-disable little-endian.
+ *                      If this is not present, it falls back to using
+ *                      `__LITTLE_ENDIAN__`. It is also worth noting that MSVC
+ *                      does not seem to provide a way to detect endianness. It
+ *                      may be that Windows requires little-endian but I can't
+ *                      find any concrete sources on this so currently
+ *                      little-endian detection is not supported on MSVC.
  */
 
 /**
@@ -160,13 +380,13 @@ typedef unsigned long jebp_uint;
 
 typedef enum jebp_error_t {
     JEBP_OK,
-    JEBP_ERROR_INVAL,   // Invalid value
-    JEBP_ERROR_INVDATA, // Invalid data
-    JEBP_ERROR_EOF,     // End of file
-    JEBP_ERROR_NOSUP,   // Not supported
-    JEBP_ERROR_NOMEM,   // No memory
-    JEBP_ERROR_IO,      // I/O error
-    JEBP_ERROR_UNKNOWN, // Unknown error
+    JEBP_ERROR_INVAL,
+    JEBP_ERROR_INVDATA,
+    JEBP_ERROR_EOF,
+    JEBP_ERROR_NOSUP,
+    JEBP_ERROR_NOMEM,
+    JEBP_ERROR_IO,
+    JEBP_ERROR_UNKNOWN,
     JEBP_NB_ERRORS
 } jebp_error_t;
 
@@ -215,6 +435,9 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 /**
  * Predefined macro detection
  */
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ <= 199901
+#error Standard C99 support is required.
+#endif
 #if defined(__clang__)
 // The default GNUC version provided by Clang is just short of what we need
 #define JEBP__GNU_VERSION 403
@@ -227,19 +450,19 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #ifdef __has_attribute
 #define JEBP__HAS_ATTRIBUTE __has_attribute
 #else // __has_attribute
+// We don't add GCC version checks since, unlike __has_builtin, __has_attribute
+// has been out for so long that its more likely that the compiler supports it.
 #define JEBP__HAS_ATTRIBUTE(attr) 0
 #endif // __has_attribute
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #define JEBP__NORETURN _Noreturn
 #elif JEBP__HAS_ATTRIBUTE(noreturn)
 #define JEBP__NORETURN __attribute__((noreturn))
-#elif defined(_WIN32)
+#elif defined(_MSC_VER)
 #define JEBP__NORETURN __declspec(noreturn)
 #else
 #define JEBP__NORETURN
 #endif
-// We don't add GCC version checks since, unlike __has_builtin, __has_attribute
-// has been out for so long that its more likely that the compiler supports it.
 #if JEBP__HAS_ATTRIBUTE(always_inline)
 #define JEBP__ALWAYS_INLINE __attribute__((always_inline))
 #elif defined(_MSC_VER)
@@ -252,16 +475,23 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #ifdef __has_builtin
 #define JEBP__HAS_BUILTIN __has_builtin
 #else // __has_builtin
-#define JEBP__HAS_BUILTIN(builtin) 0
-#endif // __has_builtin
-#if JEBP__HAS_BUILTIN(__builtin_bswap32) || JEBP__GNU_VERSION >= 403
+#define JEBP__HAS_BUILTIN(builtin)                                             \
+    defined(JEBP__VERSION##builtin) &&                                         \
+        JEBP__GNU_VERSION >= JEBP__VERSION##builtin
 // I believe this was added earlier but GCC 4.3 is the first time it was
 // mentioned in the changelog and manual.
+#define JEBP__VERSION__builtin_bswap32 403
+#endif // __has_builtin
+#if JEBP__HAS_BUILTIN(__builtin_bswap32)
 #define JEBP__SWAP32(value) __builtin_bswap32(value)
 #elif defined(_MSC_VER)
 #define JEBP__SWAP32(value) (jebp_uint) _byteswap_ulong((unsigned long)value)
 #endif
 
+// We don't do any runtime detection since that causes alot of
+// heavily-documented issues that I won't go into here. Instead, if the compiler
+// supports it (and requests it) we will use it. It helps that both AMD64 and
+// ARM64 always support the SIMD from their 32-bit counterparts.
 #if defined(__i386) || defined(__i386__) || defined(_M_IX86)
 #define JEBP__LITTLE_ENDIAN
 #if defined(__SSE2__) || _M_IX86_FP == 2
@@ -271,14 +501,18 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #define JEBP__LITTLE_ENDIAN
 #define JEBP__SIMD_SSE2
 #elif defined(__arm) || defined(__arm__) || defined(_M_ARM)
-#ifndef __ARM_BIG_ENDIAN
+#if !defined(__ARM_BIG_ENDIAN) || defined(__LITTLE_ENDIAN__)
+// Is Windows always little-endian? I get alot of conflicting results...
 #define JEBP__LITTLE_ENDIAN
 #endif // __ARM_BIG_ENDIAN
+// Windows requires Neon support
+// If GCC ever supports Windows ARM, will it be possible to compile without
+// Neon-support?
 #if defined(_WIN32) || defined(__ARM_NEON)
 #define JEBP__SIMD_NEON
 #endif
 #elif defined(__aarch64) || defined(__aarch64__) || defined(_M_ARM64)
-#ifndef __ARM_BIG_ENDIAN
+#if !defined(__ARM_BIG_ENDIAN) || defined(__LITTLE_ENDIAN__)
 #define JEBP__LITTLE_ENDIAN
 #endif // __ARM_BIG_ENDIAN
 #define JEBP__SIMD_NEON
@@ -391,13 +625,12 @@ typedef struct jebp__context_t {
 /**
  * Common utilities
  */
-JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
-                                             jebp_error_t error,
-                                             const char *file, jebp_int line) {
+JEBP__INLINE JEBP__NORETURN void
+jebp__error(jebp__context_t *ctx, jebp_error_t error, jebp_int line) {
+    // TODO: maybe the context should be free'd here to prevent leaks?
 #ifdef JEBP_LOG_ERRORS
-    fprintf(stderr, "%s:%i: %s\n", file, line, jebp_error_string(error));
+    fprintf(stderr, "line %i: %s\n", line, jebp_error_string(error));
 #else  // JEBP_LOG_ERRORS
-    (void)file;
     (void)line;
 #endif // JEBP_LOG_ERRORS
 #ifdef JEBP_ERROR
@@ -408,8 +641,7 @@ JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
     longjmp(ctx->jump, 1);
 #endif // JEBP_ERROR
 }
-#define JEBP__ERROR(error)                                                     \
-    jebp__error(ctx, JEBP_ERROR_##error, __FILE__, __LINE__)
+#define JEBP__ERROR(error) jebp__error(ctx, JEBP_ERROR_##error, __LINE__)
 
 #if !defined(JEBP_ALLOC) && !defined(JEBP_FREE)
 #include <stdlib.h>
