@@ -435,7 +435,7 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 /**
  * Predefined macro detection
  */
-#if !defined(__STDC_VERSION__) || __STDC_VERSION__ <= 199901
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 199901
 #error Standard C99 support is required.
 #endif
 #if defined(__clang__)
