@@ -455,14 +455,14 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
  */
 #ifdef __STDC_VERSION__
 #if __STDC_VERSION__ < 199901
-#error "Standard C99 support is required."
+#error "Standard C99 support is required"
 #endif
 #else // __STDC_VERSION__
 #if defined(__GNUC__)
-#warning "C version cannot be checked. Compilation may fail."
+#warning "C version cannot be checked, compilation may fail"
 #elif defined(_MSC_VER)
 #pragma message(                                                               \
-    "MSVC by default is C89 'with extensions'. Use /std:c11 to ensure there are no errors.")
+    "MSVC by default is C89 'with extensions', use /std:c11 to ensure there are no errors")
 #endif
 #endif // __STDC_VERSION__
 #if defined(__clang__)
@@ -674,7 +674,7 @@ JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
 #define JEBP_ALLOC malloc
 #define JEBP_FREE free
 #elif !defined(JEBP_ALLOC) || !defined(JEBP_FREE)
-#error "Both JEBP_ALLOC and JEBP_FREE have to be defined."
+#error "Both JEBP_ALLOC and JEBP_FREE have to be defined"
 #endif
 
 #define JEBP__CLEAR(ptr, size) memset(ptr, 0, size)

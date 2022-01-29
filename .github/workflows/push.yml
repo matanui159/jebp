@@ -2,19 +2,47 @@ name: On Push
 on: [push, pull_request]
 
 jobs:
-  build:
+  test:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Ubuntu GCC
-            os: ubuntu-latest
-            backend: ninja
-          - name: Windows MSVC
-            os: windows-latest
-            backend: vs
-    name: Build (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
+          - name: Ubuntu GCC x86-64
+            runs-on: ubuntu-latest
+            meson-cc: gcc
+            meson-flags: --werror
+          - name: Ubuntu Clang x86-64
+            runs-on: ubuntu-latest
+            meson-cc: clang
+            meson-flags: --werror
+          - name: Ubuntu MinGW x86-64
+            runs-on: ubuntu-latest
+            packages: gcc-mingw-w64-x86-64 wine-stable
+            meson-flags: --werror --cross-file cross/x86_64-w64-mingw32.ini
+          - name: Ubuntu GCC i686
+            runs-on: ubuntu-latest
+            packages: gcc-i686-linux-gnu libc-dev-i386-cross qemu-user
+            meson-flags: --werror --cross-file cross/i686-linux-gnu.ini
+          - name: Ubuntu GCC aarch64
+            runs-on: ubuntu-latest
+            packages: gcc-aarch64-linux-gnu libc-dev-arm64-cross qemu-user
+            meson-flags: --werror --cross-file cross/aarch64-linux-gnu.ini
+          - name: Ubuntu GCC arm32
+            runs-on: ubuntu-latest
+            packages: gcc-arm-linux-gnueabi libc-dev-armel-cross qemu-user
+            meson-flags: --werror --cross-file cross/arm-linux-gnueabi.ini
+          - name: Ubuntu GCC armhf
+            runs-on: ubuntu-latest
+            packages: gcc-arm-linux-gnueabihf libc-dev-armhf-cross qemu-user
+            meson-flags: --werror --cross-file cross/arm-linux-gnueabihf.ini
+          - name: Windows MSVC x86-64
+            runs-on: windows-latest
+            meson-flags: --vsenv
+          - name: MacOS Apple-Clang x86-64
+            runs-on: macos-latest
+            meson-flags: --werror
+    name: Tests (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -22,18 +50,22 @@ jobs:
           lfs: true
       - name: Install Meson
         run: pip3 install meson
-      - if: matrix.os == 'ubuntu-latest'
-        name: Install system packages
+      - if: startsWith(matrix.runs-on, 'ubuntu-')
+        name: Install APT packages
         run: |
           sudo apt-get update
-          sudo apt-get install ninja-build libsdl2-dev
+          sudo apt-get install -y ninja-build ${{ matrix.packages }}
+      - if: startsWith(matrix.runs-on, 'macos-')
+        name: Install Homebrew packages
+        run: brew install ninja ${{ matrix.packages }}
       - name: Setup project
         run: >
           meson setup bin
           --buildtype release
-          --werror
-          --backend ${{ matrix.backend }}
           -Djebp_test=true
+          ${{ matrix.meson-flags }}
+        env:
+          CC: ${{ matrix.meson-cc }}
       - name: Compile project
         run: meson compile
         working-directory: bin

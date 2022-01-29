@@ -42,10 +42,10 @@ Do not worry, these are all just files to help with development, none (except
   `JEBP_IMPLEMENTATION` and then include `jebp.h`.
 - `jebpview.c` is a demo program using SDL2 to show a WebP image. Use it with
   `jebpview <WebP image>`.
-- `meson.build`, `meson_options.txt` and `.clang-format` are Meson and
+- `meson.build`, `meson_options.txt`, `.clang-format` and `cross` are Meson and
   Clang-format files to help with development and CI. They build `jebpview`, E2E
   tests and the fuzz test, along with making it easier to run tests and format
-  code.
+  code. The cross files are designed to run in the CI.
 - `.gitignore`, `.gitattributes` and `.github` are you standard git and GitHub
   information files. Notably, included inside of `.github` is a CI to test JebP
   on various supported platforms (see below).
@@ -77,8 +77,14 @@ in the source file. The detected platforms are:
   AArch32. There is currently no need for any OS-specific code.
 
 As a subset of these, the following platforms are tested by the CI:
-- GCC on Ubuntu AMD64.
-- MSVC on Windows AMD64.
+- GCC on Ubuntu.
+- Clang on Ubuntu.
+- MSVC on Windows.
+- Apple-Clang on macOS.
+- Cross MinGW x86-64 and i686 on Ubuntu.
+- Cross GCC i686, aarch64, arm32 and armhf on Ubuntu.
+- Non little-endian tests are emulated on all architectures by removing the
+  predefined macros used for detecting little-endian.
 
 Finally, the following is also supported:
 - Transgender guys, gals, and non-binary pals :transgender_flag: because

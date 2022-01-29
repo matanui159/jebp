@@ -43,7 +43,6 @@ if get_option('jebp_test')
     test_file = executable(
         'test_file', 'test/test_file.c',
         c_args: c_args,
-        override_options: ['werror=false']
     )
     test_memory = executable(
         'test_memory', 'test/test_memory.c',
@@ -56,6 +55,10 @@ if get_option('jebp_test')
         c_args: c_args,
         override_options: ['werror=false'],
         include_directories: 'test/sys/stdlib'
+    )
+    test_noarch = executable(
+        'test_noarch', 'test/test_noarch.c',
+        c_args: c_args
     )
     tests = [
         { 'name': 'lossless-rose', 'file': 'test/lossless/rose.webp', 'size': '400x301', 'hash': '9f24f39d' },
@@ -76,6 +79,11 @@ if get_option('jebp_test')
         )
         test(
             'alloc-'+test['name'], test_memory,
+            args: [test['file'], test['size'], test['hash']],
+            workdir: meson.current_source_dir()
+        )
+        test(
+            'noarch-'+test['name'], test_noarch,
             args: [test['file'], test['size'], test['hash']],
             workdir: meson.current_source_dir()
         )
