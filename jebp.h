@@ -453,9 +453,18 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 /**
  * Predefined macro detection
  */
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ < 199901
+#ifdef __STDC_VERSION__
+#if __STDC_VERSION__ < 199901
 #error "Standard C99 support is required."
 #endif
+#else // __STDC_VERSION__
+#if defined(__GNUC__)
+#warning "C version cannot be checked. Compilation may fail."
+#elif defined(_MSC_VER)
+#pragma message(                                                               \
+    "MSVC by default is C89 'with extensions'. Use /std:c11 to ensure there are no errors.")
+#endif
+#endif // __STDC_VERSION__
 #if defined(__clang__)
 // The default GNUC version provided by Clang is just short of what we need
 #define JEBP__GNU_VERSION 403

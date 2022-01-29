@@ -3,7 +3,12 @@ project('jebp', 'c', default_options: [
     'warning_level=3'
 ])
 
+cc = meson.get_compiler('c')
 c_args = []
+if cc.get_id() == 'msvc' and get_option('c_std') == 'c99'
+    # MSVC does not support C99 and by default uses C89
+    c_args += ['/std:c11']
+endif
 if not get_option('jebp_simd')
     c_args += ['-DJEBP_NO_SIMD']
 endif
