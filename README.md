@@ -53,12 +53,12 @@ Do not worry, these are all just files to help with development, none (except
   `libFuzzer`).
 
 ## What platforms are supported?
-Any compiler that is configured to support at-least C99 is supported on any
-architecture, operating-system and endianness (including PDP-endian technically,
-see below) should work. VLA support is not required. If you find a compiler
-issue or bug with any compiler that 100% supports C99 (without VLA) including
-support for the required system headers documented in the source, then I will be
-very happy to fix it, no matter how obscure the compiler is.
+Any compiler that is configured to support at-least C99 (VLA support is not
+required) is supported on any architecture, operating-system and endianness
+(including PDP-endian technically, see below). If you find a compiler issue or
+bug with any compiler that 100% supports C99 (without VLA) including support for
+the required system headers documented in the source, then I will be very happy
+to fix it, no matter how obscure the compiler is.
 
 However, certain operating-systems, architectures and compilers are explicitly
 detected by the code to enable better support, extended features or
