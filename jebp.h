@@ -190,12 +190,27 @@
  *   `JEBP_ERROR_INVAL` means one of the arguments provided is invalid, usually
  *                      this refers to an NULL pointer.
  *   `JEBP_ERROR_INVDATA` means the WebP-encoded data is invalid or corrupted.
+ *   `JEBP_ERROR_INVDATA_HEADER` is a suberror of `INVDATA` that indicates that
+ *                      the header bytes are invalid. This file is likely not a
+ *                      WebP file.
  *   `JEBP_ERROR_EOF` means the end of the file (or data buffer) was reached
  *                    before the operation could successfully complete.
  *   `JEBP_ERROR_NOSUP` means there is a feature in the WebP stream that is not
  *                      currently supported (see below). This can also represent
  *                      new features, versions or RIFF-chunks that were not in
  *                      the specification when writing.
+ *   `JEBP_ERROR_NOSUP_CODEC` is a suberror of `NOSUP` that indicates that the
+ *                      RIFF chunk that is most likely for the codec is not
+ *                      recognized. Currently lossy images are not supported
+ *                      (see below) and lossless image support can be disabled
+ *                      (see `JEBP_NO_VP8L`).
+ *   `JEBP_ERROR_NOSUP_PALETTE` is a suberror of `NOSUP` that indicates that the
+ *                      image has a color-index transform (in WebP terminology,
+ *                      this would be a paletted image). Color-indexing
+ *                      transforms are not currently supported (see below). Note
+ *                      that this error code might be removed after
+ *                      color-indexing transform support is added, this is only
+ *                      here for now to help detecting common issues.
  *   `JEBP_ERROR_NOMEM` means that a memory allocation failed, indicating that
  *                      there is no more memory available.
  *   `JEBP_ERROR_IO` represents any generic I/O error, usually from
@@ -382,8 +397,11 @@ typedef enum jebp_error_t {
     JEBP_OK,
     JEBP_ERROR_INVAL,
     JEBP_ERROR_INVDATA,
+    JEBP_ERROR_INVDATA_HEADER,
     JEBP_ERROR_EOF,
     JEBP_ERROR_NOSUP,
+    JEBP_ERROR_NOSUP_CODEC,
+    JEBP_ERROR_NOSUP_PALETTE,
     JEBP_ERROR_NOMEM,
     JEBP_ERROR_IO,
     JEBP_ERROR_UNKNOWN,
@@ -625,19 +643,19 @@ typedef struct jebp__context_t {
 /**
  * Common utilities
  */
-JEBP__INLINE JEBP__NORETURN void
-jebp__error(jebp__context_t *ctx, jebp_error_t error, jebp_int line) {
+JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
+                                             jebp_error_t err, jebp_int line) {
     // TODO: maybe the context should be free'd here to prevent leaks?
 #ifdef JEBP_LOG_ERRORS
-    fprintf(stderr, "line %i: %s\n", line, jebp_error_string(error));
+    fprintf(stderr, "line %i: %s\n", line, jebp_error_string(err));
 #else  // JEBP_LOG_ERRORS
     (void)line;
 #endif // JEBP_LOG_ERRORS
 #ifdef JEBP_ERROR
     (void)ctx;
-    JEBP_ERROR(error);
+    JEBP_ERROR(err);
 #else  // JEBP_ERROR
-    ctx->error = error;
+    ctx->error = err;
     longjmp(ctx->jump, 1);
 #endif // JEBP_ERROR
 }
@@ -815,10 +833,10 @@ static void jebp__read_chunk(jebp__context_t *ctx, jebp__chunk_t *chunk) {
 static void jebp__read_header(jebp__context_t *ctx) {
     jebp__read_chunk(ctx, &ctx->webp_chunk);
     if (ctx->webp_chunk.tag != JEBP__RIFF_TAG) {
-        JEBP__ERROR(INVDATA);
+        JEBP__ERROR(INVDATA_HEADER);
     }
     if (jebp__read_uint32(ctx) != JEBP__WEBP_TAG) {
-        JEBP__ERROR(INVDATA);
+        JEBP__ERROR(INVDATA_HEADER);
     }
     jebp__read_chunk(ctx, &ctx->codec_chunk);
 }
@@ -1317,7 +1335,7 @@ static jebp_int jebp__read_transform(jebp__context_t *ctx,
     transform->type = (jebp__transform_type_t)jebp__read_bits(ctx, 2);
     if (transform->type == JEBP__TRANSFORM_PALETTE) {
         // TODO: support palette images
-        JEBP__ERROR(NOSUP);
+        JEBP__ERROR(NOSUP_PALETTE);
     } else if (transform->type != JEBP__TRANSFORM_GREEN) {
         jebp__read_subimage(ctx, &transform->image);
     }
@@ -1401,7 +1419,7 @@ static void jebp__apply_transform(jebp__context_t *ctx,
 
 static void jebp__read_vp8l_header(jebp__context_t *ctx) {
     if (jebp__read_uint8(ctx) != JEBP__VP8L_MAGIC) {
-        JEBP__ERROR(INVDATA);
+        JEBP__ERROR(INVDATA_HEADER);
     }
     ctx->image->width = jebp__read_bits(ctx, 14) + 1;
     ctx->image->height = jebp__read_bits(ctx, 14) + 1;
@@ -1452,8 +1470,11 @@ static const char *const jebp__error_strings[JEBP_NB_ERRORS] = {
     "Ok",
     "Invalid value or argument",
     "Invalid data or corrupted file",
+    "Invalid WebP header or corrupted file",
     "End of file",
     "Feature not supported",
+    "Codec not supported",
+    "Color-indexing or palettes are not supported",
     "Not enough memory",
     "I/O error",
     "Unknown error"};
@@ -1496,7 +1517,7 @@ static jebp_error_t jebp__read_size(jebp__context_t *ctx) {
     } else
 #endif // JEBP_NO_VP8L
     {
-        JEBP__ERROR(NOSUP);
+        JEBP__ERROR(NOSUP_CODEC);
     }
     jebp__free_context(ctx);
     return JEBP_OK;
@@ -1528,7 +1549,7 @@ static jebp_error_t jebp__read(jebp__context_t *ctx) {
     } else
 #endif // JEBP_NO_VP8L
     {
-        JEBP__ERROR(NOSUP);
+        JEBP__ERROR(NOSUP_CODEC);
     }
     jebp__free_context(ctx);
     return JEBP_OK;
