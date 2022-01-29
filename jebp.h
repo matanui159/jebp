@@ -494,8 +494,7 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #define JEBP__HAS_BUILTIN __has_builtin
 #else // __has_builtin
 #define JEBP__HAS_BUILTIN(builtin)                                             \
-    defined(JEBP__VERSION##builtin) &&                                         \
-        JEBP__GNU_VERSION >= JEBP__VERSION##builtin
+    JEBP__VERSION##builtin != 0 && JEBP__GNU_VERSION >= JEBP__VERSION##builtin
 // I believe this was added earlier but GCC 4.3 is the first time it was
 // mentioned in the changelog and manual.
 #define JEBP__VERSION__builtin_bswap32 403
