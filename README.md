@@ -79,3 +79,7 @@ in the source file. The detected platforms are:
 As a subset of these, the following platforms are tested by the CI:
 - GCC on Ubuntu AMD64.
 - MSVC on Windows AMD64.
+
+Finally, the following is also supported:
+- Transgender guys, gals, and non-binary pals :transgender_flag: because
+  everyone needs a bit of support in their life :heart:
