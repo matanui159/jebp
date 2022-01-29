@@ -174,7 +174,7 @@
  *   `jebp_int width` is the width of the image.
  *   `jebp_int height` is the height of the image.
  *   `jebp_color_t *pixels` is a pointer to an array pixels. Each `jebp_color_t`
- *                          structure contains for `jebp_ubyte` values for `r`,
+ *                          structure contains four `jebp_ubyte` values for `r`,
  *                          `g`, `b` and `a`. This allows the `pixels` pointer
  *                          to be cast to `jebp_ubyte *` to get an RGBA pixel
  *                          buffer.
