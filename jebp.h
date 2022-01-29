@@ -453,8 +453,8 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 /**
  * Predefined macro detection
  */
-#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 199901
-#error Standard C99 support is required.
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ < 199901
+#error "Standard C99 support is required."
 #endif
 #if defined(__clang__)
 // The default GNUC version provided by Clang is just short of what we need
@@ -658,14 +658,14 @@ JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
     longjmp(ctx->jump, 1);
 #endif // JEBP_ERROR
 }
-#define JEBP__ERROR(error) jebp__error(ctx, JEBP_ERROR_##error, __LINE__)
+#define JEBP__ERROR(err) jebp__error(ctx, JEBP_ERROR_##err, __LINE__)
 
 #if !defined(JEBP_ALLOC) && !defined(JEBP_FREE)
 #include <stdlib.h>
 #define JEBP_ALLOC malloc
 #define JEBP_FREE free
 #elif !defined(JEBP_ALLOC) || !defined(JEBP_FREE)
-#error Both JEBP_ALLOC and JEBP_FREE have to be defined
+#error "Both JEBP_ALLOC and JEBP_FREE have to be defined."
 #endif
 
 #define JEBP__CLEAR(ptr, size) memset(ptr, 0, size)
