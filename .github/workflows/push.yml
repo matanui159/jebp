@@ -7,38 +7,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Ubuntu GCC x86-64
+          - name: Ubuntu GCC AMD64
             runs-on: ubuntu-latest
             meson-cc: gcc
             meson-flags: --werror
-          - name: Ubuntu Clang x86-64
+          - name: Ubuntu Clang AMD64
             runs-on: ubuntu-latest
             meson-cc: clang
             meson-flags: --werror
-          - name: Ubuntu MinGW x86-64
+          - name: Ubuntu MinGW AMD64
             runs-on: ubuntu-latest
             packages: gcc-mingw-w64-x86-64 wine-stable
             meson-flags: --werror --cross-file cross/x86_64-w64-mingw32.ini
-          - name: Ubuntu GCC i686
+          - name: Ubuntu GCC IA-32
             runs-on: ubuntu-latest
             packages: gcc-i686-linux-gnu libc-dev-i386-cross qemu-user
             meson-flags: --werror --cross-file cross/i686-linux-gnu.ini
-          - name: Ubuntu GCC aarch64
+          - name: Ubuntu GCC AArch64
             runs-on: ubuntu-latest
             packages: gcc-aarch64-linux-gnu libc-dev-arm64-cross qemu-user
             meson-flags: --werror --cross-file cross/aarch64-linux-gnu.ini
-          - name: Ubuntu GCC arm32
+          - name: Ubuntu GCC AArch32
             runs-on: ubuntu-latest
             packages: gcc-arm-linux-gnueabi libc-dev-armel-cross qemu-user
             meson-flags: --werror --cross-file cross/arm-linux-gnueabi.ini
-          - name: Ubuntu GCC armhf
+          - name: Ubuntu GCC AArch32 hard-float
             runs-on: ubuntu-latest
             packages: gcc-arm-linux-gnueabihf libc-dev-armhf-cross qemu-user
             meson-flags: --werror --cross-file cross/arm-linux-gnueabihf.ini
-          - name: Windows MSVC x86-64
+          - name: Windows MSVC AMD64
             runs-on: windows-latest
             meson-flags: --vsenv
-          - name: MacOS Apple-Clang x86-64
+          - name: MacOS Clang AMD64
             runs-on: macos-latest
             meson-flags: --werror
     name: Tests (${{ matrix.name }})

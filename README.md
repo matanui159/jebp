@@ -80,9 +80,9 @@ As a subset of these, the following platforms are tested by the CI:
 - GCC on Ubuntu.
 - Clang on Ubuntu.
 - MSVC on Windows.
-- Apple-Clang on macOS.
-- Cross MinGW x86-64 on Ubuntu.
-- Cross GCC i686, aarch64, arm32 and armhf on Ubuntu.
+- Clang on macOS.
+- MinGW on Ubuntu.
+- Cross-compile GCC AMD64, AArch64, AArch32 (soft and hard float) on Ubuntu.
 - Non little-endian tests are emulated on all architectures by removing the
   predefined macros used for detecting little-endian.
 
