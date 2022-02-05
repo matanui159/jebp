@@ -20,7 +20,7 @@ For usage and documentation, see the [header file](/jebp.h#L132).
 I genuinely think WebP is a really cool format. Both PNG and JPEG (that are
 still in wide use) still use ancient technologies. Such technologies have
 improved alot since when they were released, and while there have been many
-attempts to invent the "new PNG" or the "new JPEG" most of the fall flat. WebP
+attempts to invent the "new PNG" or the "new JPEG" most of them fall flat. WebP
 seems to be the only one that has made a name for itself and has gotten a
 following, especially in the web. But, despite the name, I do believe WebP could
 be used in so many more scenarios, not just the web.
@@ -54,7 +54,7 @@ Do not worry, these are all just files to help with development, none (except
 
 ## What platforms are supported?
 Any compiler that is configured to support at-least C99 (VLA support is not
-required) is supported on any architecture, operating-system and endianness
+required) is supported on any architecture, operating-system or endianness
 (including PDP-endian technically, see below). If you find a compiler issue or
 bug with any compiler that 100% supports C99 (without VLA) including support for
 the required system headers documented in the source, then I will be very happy
@@ -81,7 +81,7 @@ As a subset of these, the following platforms are tested by the CI:
 - Clang on Ubuntu.
 - MSVC on Windows.
 - Apple-Clang on macOS.
-- Cross MinGW x86-64 and i686 on Ubuntu.
+- Cross MinGW x86-64 on Ubuntu.
 - Cross GCC i686, aarch64, arm32 and armhf on Ubuntu.
 - Non little-endian tests are emulated on all architectures by removing the
   predefined macros used for detecting little-endian.
