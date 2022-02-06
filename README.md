@@ -3,7 +3,7 @@ Don't let all the [files](#what-are-all-these-files) scare you away, infact only
 
 Currently this project only supports lossless (VP8L) images. This project:
 - Does not support decoding lossy files with VP8
-  ([support is in-progress](https://github.com/matanui159/jebp/tree/lossy)).
+  ([Draft PR](https://github.com/matanui159/jebp/pull/2)).
 - Does not support extended file-formats with VP8X.
 - Does not support VP8L lossless images with the color-indexing transform
   (palleted images).
