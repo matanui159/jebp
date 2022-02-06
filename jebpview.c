@@ -65,11 +65,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    err = jebp_read(&view_image, argv[1]);
-    if (err != JEBP_OK) {
-        view_error(jebp_error_string(err));
-    }
-
     view_surface = SDL_CreateRGBSurfaceWithFormatFrom(
         view_image.pixels, view_image.width, view_image.height, 32,
         view_image.width * 4, SDL_PIXELFORMAT_RGBA32);
