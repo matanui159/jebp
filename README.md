@@ -2,7 +2,8 @@
 Don't let all the [files](#what-are-all-these-files) scare you away, infact only [one header file](/jebp.h) is required to use this project.
 
 Currently this project only supports lossless (VP8L) images. This project:
-- Does not support decoding lossy files with VP8.
+- Does not support decoding lossy files with VP8
+  ([support is in-progress](https://github.com/matanui159/jebp/tree/lossy)).
 - Does not support extended file-formats with VP8X.
 - Does not support VP8L lossless images with the color-indexing transform
   (palleted images).
