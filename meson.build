@@ -61,10 +61,10 @@ if get_option('jebp_test')
         c_args: c_args
     )
     tests = [
-        { 'name': 'lossless-rose', 'file': 'test/lossless/rose.webp', 'size': '400x301', 'hash': '9f24f39d' },
+        { 'name': 'lossless-rose', 'file': 'test/lossless/rose.webp', 'size': '512x384', 'hash': '943882e6' },
         { 'name': 'lossless-tux', 'file': 'test/lossless/tux.webp', 'size': '386x395', 'hash': 'dd77ded2' },
-        { 'name': 'lossless-dice', 'file': 'test/lossless/dice.webp', 'size': '800x600', 'hash': 'cb524cc8' },
-        { 'name': 'lossless-compass', 'file': 'test/lossless/compass.webp', 'size': '300x300', 'hash': '6588b58e' }
+        { 'name': 'lossless-dice', 'file': 'test/lossless/dice.webp', 'size': '800x600', 'hash': 'f3285d5a' },
+        { 'name': 'lossless-compass', 'file': 'test/lossless/compass.webp', 'size': '593x593', 'hash': '72c1b232' }
     ]
     foreach test : tests
         test(

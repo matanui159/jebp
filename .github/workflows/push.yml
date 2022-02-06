@@ -86,7 +86,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install ninja-build libsdl2-dev
       - name: Setup project
-        run: meson setup bin
+        run: meson setup bin -Djebp_test=true
       - name: Format code
         run: ninja clang-format
         working-directory: bin
