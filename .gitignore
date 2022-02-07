@@ -11,3 +11,5 @@
 # Fuzzing
 *.log
 crash-*
+leak-*
+timeout-*

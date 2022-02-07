@@ -1498,12 +1498,13 @@ static jebp_error_t jebp__read_size(jebp__context_t *ctx) {
 #endif // JEBP_ERROR
     ctx->image->pixels = NULL;
     jebp__read_header(ctx);
+    switch (ctx->codec_chunk.tag) {
 #ifndef JEBP_NO_VP8L
-    if (ctx->codec_chunk.tag == JEBP__VP8L_TAG) {
+    case JEBP__VP8L_TAG:
         jebp__read_vp8l_header(ctx);
-    } else
+        break;
 #endif // JEBP_NO_VP8L
-    {
+    default:
         JEBP__ERROR(NOSUP_CODEC);
     }
     jebp__free_context(ctx);
@@ -1528,12 +1529,13 @@ static jebp_error_t jebp__read(jebp__context_t *ctx) {
 #endif // JEBP_ERROR
     ctx->image->pixels = NULL;
     jebp__read_header(ctx);
+    switch (ctx->codec_chunk.tag) {
 #ifndef JEBP_NO_VP8L
-    if (ctx->codec_chunk.tag == JEBP__VP8L_TAG) {
+    case JEBP__VP8L_TAG:
         jebp__read_vp8l(ctx);
-    } else
+        break;
 #endif // JEBP_NO_VP8L
-    {
+    default:
         JEBP__ERROR(NOSUP_CODEC);
     }
     jebp__free_context(ctx);
