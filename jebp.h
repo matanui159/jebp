@@ -778,7 +778,7 @@ static void jebp__read_bytes(jebp__context_t *ctx, size_t size, void *data) {
     }
 }
 
-// Bit-reading is currently only used by VP8L
+// 8-bit uint reading is currently only used by the bit-reader
 #ifndef JEBP_NO_VP8L
 static jebp_ubyte jebp__read_uint8(jebp__context_t *ctx) {
     ctx->nb_bits = 0;
@@ -786,9 +786,25 @@ static jebp_ubyte jebp__read_uint8(jebp__context_t *ctx) {
     jebp__check_chunk(ctx, &ctx->codec_chunk, 1);
     jebp__check_buffer(ctx);
     ctx->nb_bytes -= 1;
-    return (jebp_ubyte) * (ctx->bytes++);
+    return *(ctx->bytes++);
+}
+#endif // JEBP_NO_VP8L
+
+static jebp_uint jebp__read_uint32(jebp__context_t *ctx) {
+#ifdef JEBP__LITTLE_ENDIAN
+    jebp_uint value = 0;
+    jebp__read_bytes(ctx, 4, &value);
+    return value;
+#else  // JEBP__LITTLE_ENDIAN
+    jebp_ubyte bytes[4];
+    jebp__read_bytes(ctx, 4, bytes);
+    return (jebp_uint)bytes[0] | ((jebp_uint)bytes[1] << 8) |
+           ((jebp_uint)bytes[2] << 16) | ((jebp_uint)bytes[3] << 24);
+#endif // JEBP__LITTLE_ENDIAN
 }
 
+// Bit-reading is only used by VP8L
+#ifndef JEBP_NO_VP8L
 static jebp_int jebp__read_bits(jebp__context_t *ctx, jebp_int size) {
     jebp_int bits = 0;
     jebp_int shift = 0;
@@ -813,19 +829,6 @@ static jebp_int jebp__read_bits(jebp__context_t *ctx, jebp_int size) {
  */
 #define JEBP__RIFF_TAG 0x46464952
 #define JEBP__WEBP_TAG 0x50424557
-
-static jebp_uint jebp__read_uint32(jebp__context_t *ctx) {
-#ifdef JEBP__LITTLE_ENDIAN
-    jebp_uint value = 0;
-    jebp__read_bytes(ctx, 4, &value);
-    return value;
-#else  // JEBP__LITTLE_ENDIAN
-    jebp_ubyte bytes[4];
-    jebp__read_bytes(ctx, 4, bytes);
-    return (jebp_uint)bytes[0] | ((jebp_uint)bytes[1] << 8) |
-           ((jebp_uint)bytes[2] << 16) | ((jebp_uint)bytes[3] << 24);
-#endif // JEBP__LITTLE_ENDIAN
-}
 
 static void jebp__read_chunk(jebp__context_t *ctx, jebp__chunk_t *chunk) {
     chunk->tag = 0;
@@ -1367,7 +1370,7 @@ JEBP__INLINE void jebp__apply_predict_transform(jebp__context_t *ctx,
 
 JEBP__INLINE jebp_ubyte jebp__apply_color_delta(jebp_ubyte color,
                                                 jebp_ubyte delta) {
-    return (jebp_ubyte)(((jebp_byte)color * (jebp_byte)delta) >> 5);
+    return ((jebp_byte)color * (jebp_byte)delta) >> 5;
 }
 
 JEBP__INLINE void jebp__apply_color_transform(jebp__context_t *ctx,
