@@ -1338,9 +1338,6 @@ static jebp_int jebp__read_transform(jebp__context_t *ctx,
         transform->type = JEBP__TRANSFORM_NONE;
         return 0;
     }
-    if (transform == NULL) {
-        JEBP__ERROR(INVDATA);
-    }
     transform->type = (jebp__transform_type_t)jebp__read_bits(ctx, 2);
     if (transform->type == JEBP__TRANSFORM_PALETTE) {
         // TODO: support palette images
@@ -1448,9 +1445,9 @@ static void jebp__read_vp8l_nohead(jebp__context_t *ctx) {
             ctx->transforms[i].type = JEBP__TRANSFORM_NONE;
         }
     }
-    if (cont) {
-        // If we attempt to read a 5th transform this will fail
-        jebp__read_transform(ctx, NULL);
+    if (cont && jebp__read_bits(ctx, 1)) {
+        // there can only be 4 transforms at most
+        JEBP__ERROR(INVDATA);
     }
 
     jebp_int colcache_bits = jebp__read_colcache(ctx);
