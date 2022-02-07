@@ -1488,7 +1488,9 @@ void jebp_free_image(jebp_image_t *image) {
     }
 }
 
-static jebp_error_t jebp__memory_context(jebp__context_t **ptr, jebp_image_t *image, size_t size, const void *data) {
+static jebp_error_t jebp__memory_context(jebp__context_t **ptr,
+                                         jebp_image_t *image, size_t size,
+                                         const void *data) {
     jebp__context_t *ctx = jebp__alloc_context();
     if (ctx == NULL) {
         return JEBP_ERROR_NOMEM;
@@ -1572,7 +1574,8 @@ jebp_error_t jebp_decode(jebp_image_t *image, size_t size, const void *data) {
 }
 
 #ifndef JEBP_NO_STDIO
-static jebp_error_t jebp__file_context(jebp__context_t **ptr, jebp_image_t *image, const char *path) {
+static jebp_error_t jebp__file_context(jebp__context_t **ptr,
+                                       jebp_image_t *image, const char *path) {
     jebp__context_t *ctx = jebp__alloc_context();
     if (ctx == NULL) {
         return JEBP_ERROR_NOMEM;
