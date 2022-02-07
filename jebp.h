@@ -444,9 +444,6 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #if !defined(JEBP_NO_STDIO) || defined(JEBP_LOG_ERRORS)
 #include <stdio.h>
 #endif
-#ifndef JEBP_ERROR
-#include <setjmp.h>
-#endif // JEBP_ERROR
 #if !defined(JEBP_ALLOC) && !defined(JEBP_FREE)
 #include <stdlib.h>
 #define JEBP_ALLOC malloc
@@ -454,6 +451,10 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #elif !defined(JEBP_ALLOC) || !defined(JEBP_FREE)
 #error "Both JEBP_ALLOC and JEBP_FREE have to be defined"
 #endif
+#ifndef JEBP_ERROR
+#include <setjmp.h>
+#endif // JEBP_ERROR
+#define JEBP__CLEAR(ptr, size) memset(ptr, 0, size)
 
 /**
  * Predefined macro detection
@@ -650,6 +651,15 @@ typedef struct jebp__context_t {
 #endif // JEBP_NO_VP8L
 } jebp__context_t;
 
+static jebp__context_t *jebp__alloc_context(void) {
+    jebp__context_t *ctx = JEBP_ALLOC(sizeof(jebp__context_t));
+    if (ctx == NULL) {
+        return NULL;
+    }
+    JEBP__CLEAR(ctx, sizeof(jebp__context_t));
+    return ctx;
+}
+
 static void jebp__free_context(jebp__context_t *ctx) {
     (void)ctx;
 #ifndef JEBP_NO_STDIO
@@ -676,6 +686,7 @@ static void jebp__free_context(jebp__context_t *ctx) {
     }
     JEBP_FREE(ctx->huffman_image.pixels);
 #endif // JEBP_NO_VP8L
+    JEBP_FREE(ctx);
 }
 
 /**
@@ -688,10 +699,9 @@ JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
 #else  // JEBP_LOG_ERRORS
     (void)line;
 #endif // JEBP_LOG_ERRORS
-    jebp__free_context(ctx);
     jebp_free_image(ctx->image);
 #ifdef JEBP_ERROR
-    (void)ctx;
+    jebp__free_context(ctx);
     JEBP_ERROR(err);
 #else  // JEBP_ERROR
     ctx->error = err;
@@ -700,7 +710,6 @@ JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
 }
 #define JEBP__ERROR(err) jebp__error(ctx, JEBP_ERROR_##err, __LINE__)
 
-#define JEBP__CLEAR(ptr, size) memset(ptr, 0, size)
 #define JEBP__MIN(a, b) ((a) < (b) ? (a) : (b))
 #define JEBP__MAX(a, b) ((a) > (b) ? (a) : (b))
 #define JEBP__ABS(a) ((a) < 0 ? -(a) : (a))
@@ -1482,18 +1491,24 @@ void jebp_free_image(jebp_image_t *image) {
     }
 }
 
-static void jebp__memory_context(jebp__context_t *ctx, jebp_image_t *image,
-                                 size_t size, const void *data) {
-    JEBP__CLEAR(ctx, sizeof(jebp__context_t));
+static jebp_error_t jebp__memory_context(jebp__context_t **ptr, jebp_image_t *image, size_t size, const void *data) {
+    jebp__context_t *ctx = jebp__alloc_context();
+    if (ctx == NULL) {
+        return JEBP_ERROR_NOMEM;
+    }
     ctx->image = image;
     ctx->nb_bytes = size;
     ctx->bytes = data;
+    *ptr = ctx;
+    return JEBP_OK;
 }
 
 static jebp_error_t jebp__read_size(jebp__context_t *ctx) {
 #ifndef JEBP_ERROR
     if (setjmp(ctx->jump)) {
-        return ctx->error;
+        jebp_error_t err = ctx->error;
+        jebp__free_context(ctx);
+        return err;
     }
 #endif // JEBP_ERROR
     ctx->image->pixels = NULL;
@@ -1516,15 +1531,20 @@ jebp_error_t jebp_decode_size(jebp_image_t *image, size_t size,
     if (image == NULL || data == NULL) {
         return JEBP_ERROR_INVAL;
     }
-    jebp__context_t ctx;
-    jebp__memory_context(&ctx, image, size, data);
-    return jebp__read_size(&ctx);
+    jebp__context_t *ctx;
+    jebp_error_t err = jebp__memory_context(&ctx, image, size, data);
+    if (err != JEBP_OK) {
+        return err;
+    }
+    return jebp__read_size(ctx);
 }
 
 static jebp_error_t jebp__read(jebp__context_t *ctx) {
 #ifndef JEBP_ERROR
     if (setjmp(ctx->jump)) {
-        return ctx->error;
+        jebp_error_t err = ctx->error;
+        jebp__free_context(ctx);
+        return err;
     }
 #endif // JEBP_ERROR
     ctx->image->pixels = NULL;
@@ -1546,25 +1566,32 @@ jebp_error_t jebp_decode(jebp_image_t *image, size_t size, const void *data) {
     if (image == NULL || data == NULL) {
         return JEBP_ERROR_INVAL;
     }
-    jebp__context_t ctx;
-    jebp__memory_context(&ctx, image, size, data);
-    return jebp__read(&ctx);
+    jebp__context_t *ctx;
+    jebp_error_t err = jebp__memory_context(&ctx, image, size, data);
+    if (err != JEBP_OK) {
+        return err;
+    }
+    return jebp__read(ctx);
 }
 
 #ifndef JEBP_NO_STDIO
-static jebp_error_t jebp__file_context(jebp__context_t *ctx,
-                                       jebp_image_t *image, const char *path) {
-    JEBP__CLEAR(ctx, sizeof(jebp__context_t));
+static jebp_error_t jebp__file_context(jebp__context_t **ptr, jebp_image_t *image, const char *path) {
+    jebp__context_t *ctx = jebp__alloc_context();
+    if (ctx == NULL) {
+        return JEBP_ERROR_NOMEM;
+    }
     ctx->image = image;
     ctx->file = fopen(path, "rb");
     if (ctx->file == NULL) {
+        jebp__free_context(ctx);
         return JEBP_ERROR_IO;
     }
     ctx->buffer = JEBP_ALLOC(JEBP__BUFFER_SIZE);
     if (ctx->buffer == NULL) {
-        fclose(ctx->file);
+        jebp__free_context(ctx);
         return JEBP_ERROR_NOMEM;
     }
+    *ptr = ctx;
     return JEBP_OK;
 }
 
@@ -1572,24 +1599,24 @@ jebp_error_t jebp_read_size(jebp_image_t *image, const char *path) {
     if (image == NULL || path == NULL) {
         return JEBP_ERROR_INVAL;
     }
-    jebp__context_t ctx;
+    jebp__context_t *ctx;
     jebp_error_t err = jebp__file_context(&ctx, image, path);
     if (err != JEBP_OK) {
         return err;
     }
-    return jebp__read_size(&ctx);
+    return jebp__read_size(ctx);
 }
 
 jebp_error_t jebp_read(jebp_image_t *image, const char *path) {
     if (image == NULL || path == NULL) {
         return JEBP_ERROR_INVAL;
     }
-    jebp__context_t ctx;
+    jebp__context_t *ctx;
     jebp_error_t err = jebp__file_context(&ctx, image, path);
     if (err != JEBP_OK) {
         return err;
     }
-    return jebp__read(&ctx);
+    return jebp__read(ctx);
 }
 #endif // JEBP_NO_STDIO
 
