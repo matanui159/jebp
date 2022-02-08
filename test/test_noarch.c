@@ -4,9 +4,9 @@
 #undef __i386
 #undef __i386__
 #undef _M_IX86
-#undef __amd64
-#undef __amd64__
-#undef _M_AMD64
+#undef __x86_64
+#undef __x86_64__
+#undef _M_X64
 #undef __arm
 #undef __arm__
 #undef _M_ARM
