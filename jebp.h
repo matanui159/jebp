@@ -321,25 +321,21 @@
  *                       few areas. If the architecture is not little-endian or
  *                       cannot be detected as such, a naive solution is used
  *                       instead.
- *   `_WIN32` is used to check if this is being compiled on Windows. Currently
- *            this is only used for Neon support since Windows requires Neon
- *            support to be present and MSVC does not provide any method of
- *            detecting Neon support.
  *   `__i386`, `__i386__` and `_M_IX86` are used to detect if this is being
- *           compiled for IA-32 (also known as x86, x86-32 or i386). If one of
+ *           compiled for x86-32 (also known as x86, IA-32, or i386). If one of
  *           these are defined, it is also assumed that the architecture is
  *           little-endian. `_M_IX86` is usually present on MSVC, while
  *           the other two are usually present on most other compilers.
- *   `__SSE2__` and `_M_IX86_FP` are used to detect SSE2 support on IA-32.
+ *   `__SSE2__` and `_M_IX86_FP` are used to detect SSE2 support on x86-32.
  *              `_M_IX86`, which is usually present on MSVC, must equal 2 to
  *              indicate that the code is being compiled for a SSE2-compatible
  *              floating-point unit. `__SSE2__` is usually present on most other
  *              compilers.
- *   `__amd64`, `__amd64__` and `_M_AMD64` are used to detect if this is being
- *            compiled for AMD64 (also known as x86-64). If one of these are
+ *   `__x86_64`, `__x86_64__` and `_M_X64` are used to detect if this is being
+ *            compiled for x86-64 (also known as AMD64). If one of these are
  *            defined, it is also assumed that the architecture is little-endian
- *            and that SSE2 is supported (which is required for AMD64 support).
- *            `_M_AMD64` is usually present on MSVC, while the other two are
+ *            and that SSE2 is supported (which is required for x86-64 support).
+ *            `_M_X64` is usually present on MSVC, while the other two are
  *            usually present on most other compilers.
  *   `__arm`, `__arm__` and `_M_ARM` are used to detect if this is being
  *            compiled for AArch32 (also known as arm32 or armhf). If one of
@@ -348,8 +344,9 @@
  *            present on MSVC while the other two are usually present on most
  *            other compilers.
  *   `__ARM_NEON` is used to detect Neon support on AArch32. MSVC doesn't seem
- *                to support this, but it is not required since Windows always
- *                supports Neon.
+ *                to support this and I can't find any info on detecting Neon
+ *                support for MSVC. I have found mentions of Windows requiring
+ *                Neon support but cannot find any concrete proof anywhere.
  *   `__aarch64`, `__aarch64__` and `_M_ARM64` are used to detect if this is
  *                being compiled for AArch64 (also known as arm64). If one of
  *                these are defined, it is also assumed that Neon is supported
@@ -522,27 +519,27 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 
 // We don't do any runtime detection since that causes alot of
 // heavily-documented issues that I won't go into here. Instead, if the compiler
-// supports it (and requests it) we will use it. It helps that both AMD64 and
-// ARM64 always support the SIMD from their 32-bit counterparts.
+// supports it (and requests it) we will use it. It helps that both x86-64 and
+// AArch64 always support the SIMD from their 32-bit counterparts.
 #if defined(__i386) || defined(__i386__) || defined(_M_IX86)
 #define JEBP__LITTLE_ENDIAN
 #if defined(__SSE2__) || _M_IX86_FP == 2
 #define JEBP__SIMD_SSE2
 #endif
-#elif defined(__amd64) || defined(__amd64__) || defined(_M_AMD64)
+#elif defined(__x86_64) || defined(__x86_64__) || defined(_M_X64)
 #define JEBP__LITTLE_ENDIAN
 #define JEBP__SIMD_SSE2
 #elif defined(__arm) || defined(__arm__) || defined(_M_ARM)
 #if !defined(__ARM_BIG_ENDIAN) || defined(__LITTLE_ENDIAN__)
 // Is Windows always little-endian? I get alot of conflicting results...
 #define JEBP__LITTLE_ENDIAN
-#endif // __ARM_BIG_ENDIAN
-// Windows requires Neon support
-// If GCC ever supports Windows ARM, will it be possible to compile without
-// Neon-support?
-#if defined(_WIN32) || defined(__ARM_NEON)
-#define JEBP__SIMD_NEON
 #endif
+#ifdef __ARM_NEON
+// There used to be a check for Windows here since I believed that Windows
+// always required Neon support to be installed but I cannot find that mentioned
+// anywhere.
+#define JEBP__SIMD_NEON
+#endif // __ARM_NEON
 #elif defined(__aarch64) || defined(__aarch64__) || defined(_M_ARM64)
 #if !defined(__ARM_BIG_ENDIAN) || defined(__LITTLE_ENDIAN__)
 #define JEBP__LITTLE_ENDIAN

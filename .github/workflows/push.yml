@@ -7,19 +7,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Ubuntu GCC AMD64
+          - name: Ubuntu GCC x86-64
             runs-on: ubuntu-latest
             meson-cc: gcc
             meson-flags: --werror
-          - name: Ubuntu Clang AMD64
+          - name: Ubuntu Clang x86-64
             runs-on: ubuntu-latest
             meson-cc: clang
             meson-flags: --werror
-          - name: Ubuntu MinGW AMD64
+          - name: Ubuntu MinGW x86-64
             runs-on: ubuntu-latest
             packages: gcc-mingw-w64-x86-64 wine-stable
             meson-flags: --werror --cross-file cross/x86_64-w64-mingw32.ini
-          - name: Ubuntu GCC IA-32
+          - name: Ubuntu GCC x86-32
             runs-on: ubuntu-latest
             packages: gcc-i686-linux-gnu libc-dev-i386-cross qemu-user
             meson-flags: --werror --cross-file cross/i686-linux-gnu.ini
@@ -35,10 +35,10 @@ jobs:
             runs-on: ubuntu-latest
             packages: gcc-arm-linux-gnueabihf libc-dev-armhf-cross qemu-user
             meson-flags: --werror --cross-file cross/arm-linux-gnueabihf.ini
-          - name: Windows MSVC AMD64
+          - name: Windows MSVC x86-64
             runs-on: windows-latest
             meson-flags: --vsenv
-          - name: MacOS Clang AMD64
+          - name: MacOS Clang x86-64
             runs-on: macos-latest
             meson-flags: --werror
     name: Tests (${{ matrix.name }})

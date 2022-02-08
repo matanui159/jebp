@@ -1,5 +1,6 @@
 # JebP - Single header WebP decoder
-Don't let all the [files](#what-are-all-these-files) scare you away, infact only [one header file](/jebp.h) is required to use this project.
+Don't let all the [files](#what-are-all-these-files) scare you away, infact only
+[one header file](/jebp.h) is required to use this project.
 
 Currently this project only supports lossless (VP8L) images. This project:
 - Does not support decoding lossy files with VP8
@@ -68,14 +69,12 @@ every change. The full list of macros used to detect the platform is documented
 in the source file. The detected platforms are:
 - The compilers GCC, Clang and MSVC. Only GCC currently has version detection,
   the other two assume everything is supported.
-- The architectures IA-32 (x86, x86-32, i386), AMD64 (x86-64), AArch32 (arm32,
+- The architectures x86-32 (x86, IA-32, i386), x86-64 (AMD64), AArch32 (arm32,
   armhf) and AArch64 (arm64).
 - The SIMD variants SSE2 (x86) and Neon (AArch). Currently unused.
 - Any little-endian architecture. Any other form of endianness, including
   big-endian, are not detected and do not have optimized functions. Instead,
   they use naive approaches.
-- The operating system Windows. This is only used to detect Neon support on
-  AArch32. There is currently no need for any OS-specific code.
 
 As a subset of these, the following platforms are tested by the CI:
 - GCC on Ubuntu.
@@ -83,7 +82,7 @@ As a subset of these, the following platforms are tested by the CI:
 - MSVC on Windows.
 - Clang on macOS.
 - MinGW on Ubuntu.
-- Cross-compile GCC AMD64, AArch64, AArch32 (soft and hard float) on Ubuntu.
+- Cross-compile GCC x86-32, AArch64, AArch32 (soft and hard float) on Ubuntu.
 - Non little-endian tests are emulated on all architectures by removing the
   predefined macros used for detecting little-endian.
 
