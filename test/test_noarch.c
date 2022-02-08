@@ -1,5 +1,8 @@
 #include "test_util.h"
 
+// Include setjmp.h early since it requires the macros we are about to disable
+#include <setjmp.h>
+
 // Disable everything that can be used to test the architecture or endiannes
 #undef __i386
 #undef __i386__
