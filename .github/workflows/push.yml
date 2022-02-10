@@ -68,7 +68,7 @@ jobs:
         run: ctest --test-dir bin --build-config Release
       - if: failure()
         name: Upload logs
-        uses: action/upload-artifacts@v2
+        uses: actions/upload-artifact@v2
         with:
           name: logs
           path: |
