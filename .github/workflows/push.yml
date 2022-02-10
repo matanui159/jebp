@@ -42,6 +42,7 @@ jobs:
             cmake-flags: -DCMAKE_TOOLCHAIN_FILE=dev/toolchain/arm-linux-gnueabihf.cmake
           - name: Windows MSVC x86-64
             runs-on: windows-latest
+            cflags: /WX
           - name: MacOS Clang x86-64
             runs-on: macos-latest
             cflags: -Werror
