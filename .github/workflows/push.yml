@@ -65,7 +65,7 @@ jobs:
       - name: Compile project
         run: cmake --build bin
       - name: Run tests
-        run: ctest --test-dir bin
+        run: ctest --test-dir bin --build-config Release --output-on-failure
 
   format:
     name: Format
