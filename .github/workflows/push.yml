@@ -63,7 +63,7 @@ jobs:
           CC: ${{ matrix.cc }}
           CFLAGS: ${{ matrix.cflags }}
       - name: Compile project
-        run: cmake --build bin
+        run: cmake --build bin --config Release
       - name: Run tests
         run: ctest --test-dir bin --build-config Release
       - if: failure()
