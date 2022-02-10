@@ -9,7 +9,6 @@ jobs:
         include:
           - name: Ubuntu GCC x86-64
             runs-on: ubuntu-latest
-            cc: gcc
             cflags: -Werror
           - name: Ubuntu Clang x86-64
             runs-on: ubuntu-latest
@@ -19,27 +18,27 @@ jobs:
             runs-on: ubuntu-latest
             packages: gcc-mingw-w64-x86-64 wine-stable
             cflags: -Werror
-            cmake-flags: -DCMAKE_TOOLCHAIN_FILE=dev/toolchain/x86_64-w64-mingw32.cmake
+            cmake-flags: --toolchain dev/toolchain/x86_64-w64-mingw32.cmake
           - name: Ubuntu GCC x86-32
             runs-on: ubuntu-latest
             packages: gcc-i686-linux-gnu libc-dev-i386-cross qemu-user
             cflags: -Werror
-            cmake-flags: -DCMAKE_TOOLCHAIN_FILE=dev/toolchain/i686-linux-gnu.cmake
+            cmake-flags: --toolchain dev/toolchain/i686-linux-gnu.cmake
           - name: Ubuntu GCC AArch64
             runs-on: ubuntu-latest
             packages: gcc-aarch64-linux-gnu libc-dev-arm64-cross qemu-user
             cflags: -Werror
-            cmake-flags: -DCMAKE_TOOLCHAIN_FILE=dev/toolchain/aarch64-linux-gnu.cmake
+            cmake-flags: --toolchain dev/toolchain/aarch64-linux-gnu.cmake
           - name: Ubuntu GCC AArch32
             runs-on: ubuntu-latest
             packages: gcc-arm-linux-gnueabi libc-dev-armel-cross qemu-user
             cflags: -Werror
-            cmake-flags: -DCMAKE_TOOLCHAIN_FILE=dev/toolchain/arm-linux-gnueabi.cmake
+            cmake-flags: --toolchain dev/toolchain/arm-linux-gnueabi.cmake
           - name: Ubuntu GCC AArch32 hard-float
             runs-on: ubuntu-latest
             packages: gcc-arm-linux-gnueabihf libc-dev-armhf-cross qemu-user
             cflags: -Werror
-            cmake-flags: -DCMAKE_TOOLCHAIN_FILE=dev/toolchain/arm-linux-gnueabihf.cmake
+            cmake-flags: --toolchain dev/toolchain/arm-linux-gnueabihf.cmake
           - name: Windows MSVC x86-64
             runs-on: windows-latest
             cflags: /WX
