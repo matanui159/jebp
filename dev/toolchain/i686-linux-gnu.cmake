@@ -1,0 +1,5 @@
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR i686)
+set(prefix i686-linux-gnu)
+set(CMAKE_C_COMPILER ${prefix}-gcc)
+set(CMAKE_CROSSCOMPILING_EMULATOR qemu-i386 -L /usr/${prefix})

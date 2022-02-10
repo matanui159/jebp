@@ -762,7 +762,7 @@ static void jebp__check_chunk(jebp__context_t *ctx, jebp__chunk_t *chunk,
         if (size > chunk->size) {
             JEBP__ERROR(INVDATA);
         }
-        chunk->size -= size;
+        chunk->size -= (jebp_uint)size;
     }
 }
 
