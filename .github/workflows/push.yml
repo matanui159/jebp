@@ -65,7 +65,17 @@ jobs:
       - name: Compile project
         run: cmake --build bin
       - name: Run tests
-        run: ctest --test-dir bin --build-config Release --output-on-failure
+        run: ctest --test-dir bin --build-config Release
+      - if: failure()
+        name: Upload logs
+        uses: actions/upload-artifacts@v2
+        with:
+          name: logs
+          path: |
+            bin/CMakeFiles/CMakeOutput.log
+            bin/CMakeFiles/CMakeError.log
+            bin/Testing/Temporary/LastTest.log
+            bin/Testing/Temporary/LastTestsFailed.log
 
   format:
     name: Format
