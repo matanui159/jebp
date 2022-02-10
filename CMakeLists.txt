@@ -4,7 +4,7 @@ include(CTest)
 include(CheckCCompilerFlag)
 
 # Options
-if(${CMAKE_BUILD_TYPE} STREQUAL Debug)
+if("${CMAKE_BUILD_TYPE}" STREQUAL Debug)
     set(log_errors_default ON)
 endif()
 option(JEBP_STDIO "Enable I/O support" ON)

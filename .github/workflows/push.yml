@@ -63,11 +63,9 @@ jobs:
           CC: ${{ matrix.cc }}
           CFLAGS: ${{ matrix.cflags }}
       - name: Compile project
-        run: make
-        working-directory: bin
+        run: cmake --build bin
       - name: Run tests
-        run: ctest
-        working-directory: bin
+        run: ctest --test-dir bin
 
   format:
     name: Format
@@ -78,7 +76,6 @@ jobs:
       - name: Configure project
         run: cmake -B bin
       - name: Format code
-        run: make format
-        working-directory: bin
+        run: cmake --build bin --target format
       - name: Check for differences
         run: git diff --exit-code --color
