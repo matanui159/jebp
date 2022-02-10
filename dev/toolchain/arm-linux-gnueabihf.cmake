@@ -1,0 +1,6 @@
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR armhf)
+set(prefix arm-linux-gnueabihf)
+set(CMAKE_C_COMPILER ${prefix}-gcc)
+set(CMAKE_SYSROOT /usr/${prefix})
+set(CMAKE_CROSSCOMPILING_EMULATOR qemu-arm -L ${CMAKE_SYSROOT})

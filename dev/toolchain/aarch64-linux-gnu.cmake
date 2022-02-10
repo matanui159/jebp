@@ -1,0 +1,6 @@
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR armv8)
+set(prefix aarch64-linux-gnu)
+set(CMAKE_C_COMPILER ${prefix}-gcc)
+set(CMAKE_SYSROOT /usr/${prefix})
+set(CMAKE_CROSSCOMPILING_EMULATOR qemu-aarch64 -L ${CMAKE_SYSROOT})
