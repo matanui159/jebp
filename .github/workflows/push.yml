@@ -9,11 +9,11 @@ jobs:
         include:
           - name: Ubuntu GCC x86-64
             runs-on: ubuntu-latest
-            asan-options: detect_leaks=1
+            cmake-flags: -DJEBP_SANITIZE=ON
           - name: Ubuntu Clang x86-64
             runs-on: ubuntu-latest
             cc: clang
-            asan-options: detect_leaks=1
+            cmake-flags: -DJEBP_SANITIZE=ON
           - name: Ubuntu MinGW x86-64
             runs-on: ubuntu-latest
             packages: gcc-mingw-w64-x86-64 wine-stable
@@ -36,8 +36,10 @@ jobs:
             cmake-flags: --toolchain dev/toolchain/arm-linux-gnueabihf.cmake
           - name: Windows MSVC x86-64
             runs-on: windows-latest
+            cmake-flags: -DJEBP_SANITIZE=ON
           - name: MacOS Clang x86-64
             runs-on: macos-latest
+            cmake-flags: -DJEBP_SANITIZE=ON
     name: Tests (${{ matrix.name }})
     runs-on: ${{ matrix.runs-on }}
     steps:
@@ -51,7 +53,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.packages }}
       - name: Configure project
-        run: cmake -B bin -DCMAKE_BUILD_TYPE=Release -DJEBP_SANITIZE=ON ${{ matrix.cmake-flags }}
+        run: cmake -B bin -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake-flags }}
         env:
           CC: ${{ matrix.cc }}
           CFLAGS: ${{ matrix.cflags }}
@@ -59,8 +61,6 @@ jobs:
         run: cmake --build bin --config Release
       - name: Run tests
         run: ctest --test-dir bin --build-config Release --verbose
-        env:
-          ASAN_OPTIONS: ${{ matrix.asan-options }}
 
   format:
     name: Format
