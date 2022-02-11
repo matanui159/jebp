@@ -514,7 +514,7 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #if JEBP__HAS_BUILTIN(__builtin_bswap32)
 #define JEBP__SWAP32(value) __builtin_bswap32(value)
 #elif defined(_MSC_VER)
-#define JEBP__SWAP32(value) (jebp_uint) _byteswap_ulong((unsigned long)value)
+#define JEBP__SWAP32(value) _byteswap_ulong(value)
 #endif
 
 // We don't do any runtime detection since that causes alot of
@@ -657,6 +657,18 @@ static jebp__context_t *jebp__alloc_context(void) {
     return ctx;
 }
 
+static void jebp__free_context_groups(jebp__context_t *ctx) {
+    for (jebp_int i = 0; i < ctx->nb_groups; i += 1) {
+        jebp__huffman_group_t *group = &ctx->groups[i];
+        JEBP_FREE(group->main.tables->values);
+        JEBP_FREE(group->red.tables->values);
+        JEBP_FREE(group->blue.tables->values);
+        JEBP_FREE(group->alpha.tables->values);
+        JEBP_FREE(group->dist.tables->values);
+    }
+    JEBP_FREE(ctx->groups);
+}
+
 static void jebp__free_context(jebp__context_t *ctx) {
     (void)ctx;
 #ifndef JEBP_NO_STDIO
@@ -669,15 +681,7 @@ static void jebp__free_context(jebp__context_t *ctx) {
 #ifndef JEBP_NO_VP8L
     JEBP_FREE(ctx->colcache);
     JEBP_FREE(ctx->lengths);
-    for (jebp_int i = 0; i < ctx->nb_groups; i += 1) {
-        jebp__huffman_group_t *group = &ctx->groups[i];
-        JEBP_FREE(group->main.tables->values);
-        JEBP_FREE(group->red.tables->values);
-        JEBP_FREE(group->blue.tables->values);
-        JEBP_FREE(group->alpha.tables->values);
-        JEBP_FREE(group->dist.tables->values);
-    }
-    JEBP_FREE(ctx->groups);
+    jebp__free_context_groups(ctx);
     for (jebp_int i = 0; i < 4; i += 1) {
         JEBP_FREE(ctx->transforms[i].image.pixels);
     }
@@ -1080,10 +1084,11 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image,
         }
     }
     if (nb_groups > ctx->nb_groups) {
-        JEBP_FREE(ctx->groups);
+        jebp__free_context_groups(ctx);
         size_t groups_size = nb_groups * sizeof(jebp__huffman_group_t);
         ctx->groups = JEBP_ALLOC(groups_size);
         if (ctx->groups == NULL) {
+            ctx->nb_groups = 0;
             JEBP__ERROR(NOMEM);
         }
         JEBP__CLEAR(ctx->groups, groups_size);
