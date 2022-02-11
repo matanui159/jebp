@@ -9,9 +9,11 @@ jobs:
         include:
           - name: Ubuntu GCC x86-64
             runs-on: ubuntu-latest
+            asan-options: detect_leaks=1
           - name: Ubuntu Clang x86-64
             runs-on: ubuntu-latest
             cc: clang
+            asan-options: detect_leaks=1
           - name: Ubuntu MinGW x86-64
             runs-on: ubuntu-latest
             packages: gcc-mingw-w64-x86-64 wine-stable
@@ -57,6 +59,8 @@ jobs:
         run: cmake --build bin --config Release
       - name: Run tests
         run: ctest --test-dir bin --build-config Release --verbose
+        env:
+          ASAN_OPTIONS: ${{ matrix.asan-options }}
 
   format:
     name: Format

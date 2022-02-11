@@ -22,9 +22,6 @@ function(add_test_image name image size hash)
         COMMAND jebptest ${image} ${size} ${hash}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
-    if(HAVE_FSANITIZE_LEAK)
-        set_tests_properties(${name} PROPERTIES ENVIRONMENT ASAN_OPTIONS=detect_leaks=1)
-    endif()
 endfunction()
 if(BUILD_TESTING)
     add_executable(jebptest jebptest.c)
