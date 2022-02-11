@@ -1068,7 +1068,9 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image,
         }
         ctx->colcache_bits = colcache_bits;
     }
-    JEBP__CLEAR(ctx->colcache, colcache_size);
+    if (colcache_bits > 0) {
+        JEBP__CLEAR(ctx->colcache, colcache_size);
+    }
 
     jebp_int nb_groups = 1;
     if (huffman_image != NULL) {
