@@ -9,42 +9,33 @@ jobs:
         include:
           - name: Ubuntu GCC x86-64
             runs-on: ubuntu-latest
-            cflags: -Werror
           - name: Ubuntu Clang x86-64
             runs-on: ubuntu-latest
             cc: clang
-            cflags: -Werror
           - name: Ubuntu MinGW x86-64
             runs-on: ubuntu-latest
             packages: gcc-mingw-w64-x86-64 wine-stable
-            cflags: -Werror
             cmake-flags: --toolchain dev/toolchain/x86_64-w64-mingw32.cmake
           - name: Ubuntu GCC x86-32
             runs-on: ubuntu-latest
             packages: gcc-i686-linux-gnu libc-dev-i386-cross qemu-user
-            cflags: -Werror
             cmake-flags: --toolchain dev/toolchain/i686-linux-gnu.cmake
           - name: Ubuntu GCC AArch64
             runs-on: ubuntu-latest
             packages: gcc-aarch64-linux-gnu libc-dev-arm64-cross qemu-user
-            cflags: -Werror
             cmake-flags: --toolchain dev/toolchain/aarch64-linux-gnu.cmake
           - name: Ubuntu GCC AArch32
             runs-on: ubuntu-latest
             packages: gcc-arm-linux-gnueabi libc-dev-armel-cross qemu-user
-            cflags: -Werror
             cmake-flags: --toolchain dev/toolchain/arm-linux-gnueabi.cmake
           - name: Ubuntu GCC AArch32 hard-float
             runs-on: ubuntu-latest
             packages: gcc-arm-linux-gnueabihf libc-dev-armhf-cross qemu-user
-            cflags: -Werror
             cmake-flags: --toolchain dev/toolchain/arm-linux-gnueabihf.cmake
           - name: Windows MSVC x86-64
             runs-on: windows-latest
-            cflags: /WX
           - name: MacOS Clang x86-64
             runs-on: macos-latest
-            cflags: -Werror
     name: Tests (${{ matrix.name }})
     runs-on: ${{ matrix.runs-on }}
     steps:
@@ -58,7 +49,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.packages }}
       - name: Configure project
-        run: cmake -B bin -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake-flags }}
+        run: cmake -B bin -DCMAKE_BUILD_TYPE=Release -DJEBP_SANITIZE=ON ${{ matrix.cmake-flags }}
         env:
           CC: ${{ matrix.cc }}
           CFLAGS: ${{ matrix.cflags }}
