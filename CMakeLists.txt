@@ -4,7 +4,7 @@ include(CTest)
 include(CheckCCompilerFlag)
 
 # Options
-if(CMAKE_BUILD_TYPE MATCHES ^Rel)
+if(CMAKE_BUILD_TYPE MATCHES Rel)
     set(werror_default ON)
 endif()
 if(CMAKE_BUILD_TYPE STREQUAL Debug)

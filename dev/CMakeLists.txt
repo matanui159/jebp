@@ -36,15 +36,17 @@ if(BUILD_TESTING)
 endif()
 
 # Fuzz test
-add_c_flag(-fsanitize=fuzzer HAVE_FSANITIZE_FUZZER)
-if(HAVE_FSANITIZE_FUZZER)
-    set(fuzz_dir ${CMAKE_BINARY_DIR}/fuzz)
-    file(MAKE_DIRECTORY ${fuzz_dir})
-    add_executable(jebpfuzz EXCLUDE_FROM_ALL jebpfuzz.c)
-    target_link_libraries(jebpfuzz PRIVATE ${link_options})
-    add_custom_target(
-        fuzz
-        COMMAND jebpfuzz ${fuzz_dir} lossless
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    )
+if(JEBP_SANITIZE)
+    add_c_flag(-fsanitize=fuzzer HAVE_FSANITIZE_FUZZER)
+    if(HAVE_FSANITIZE_FUZZER)
+        set(fuzz_dir ${CMAKE_BINARY_DIR}/fuzz)
+        file(MAKE_DIRECTORY ${fuzz_dir})
+        add_executable(jebpfuzz EXCLUDE_FROM_ALL jebpfuzz.c)
+        target_link_libraries(jebpfuzz PRIVATE ${link_options})
+        add_custom_target(
+            fuzz
+            COMMAND jebpfuzz ${fuzz_dir} lossless
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+    endif()
 endif()
