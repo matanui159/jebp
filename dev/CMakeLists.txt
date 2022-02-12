@@ -41,7 +41,7 @@ if(JEBP_SANITIZE)
     if(HAVE_FSANITIZE_FUZZER)
         set(fuzz_dir ${CMAKE_BINARY_DIR}/fuzz)
         file(MAKE_DIRECTORY ${fuzz_dir})
-        add_executable(jebpfuzz EXCLUDE_FROM_ALL jebpfuzz.c)
+        add_executable(jebpfuzz jebpfuzz.c)
         target_link_libraries(jebpfuzz PRIVATE ${link_options})
         add_custom_target(
             fuzz
