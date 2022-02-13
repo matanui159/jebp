@@ -1005,16 +1005,15 @@ static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman,
 static const jebp_byte jebp__vp8l_offsets[JEBP__NB_VP8L_OFFSETS][2];
 
 static jebp_int jebp__read_colcache(jebp__context_t *ctx) {
-    if (jebp__read_bits(ctx, 1)) {
-        // color cache
-        jebp_int colcache_bits = jebp__read_bits(ctx, 4);
-        if (colcache_bits < 1 || colcache_bits > 11) {
-            JEBP__ERROR(INVDATA);
-        }
-        return colcache_bits;
-    } else {
+    if (!jebp__read_bits(ctx, 1)) {
+        // no color cache
         return 0;
     }
+    jebp_int colcache_bits = jebp__read_bits(ctx, 4);
+    if (colcache_bits < 1 || colcache_bits > 11) {
+        JEBP__ERROR(INVDATA);
+    }
+    return colcache_bits;
 }
 
 JEBP__INLINE void jebp__colcache_insert(jebp__context_t *ctx,
@@ -1048,7 +1047,7 @@ JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx,
 JEBP__INLINE jebp_color_t *jebp__index_subimage(jebp_image_t *image,
                                                 jebp_color_t *pixel,
                                                 jebp__subimage_t *subimage) {
-    jebp_int i = (jebp_int)(pixel - image->pixels);
+    jebp_int i = pixel - image->pixels;
     jebp_int x = i % image->width;
     jebp_int y = i / image->width;
     jebp_int j = (y >> subimage->block_bits) * subimage->width +
@@ -1340,7 +1339,7 @@ static jebp_int jebp__read_transform(jebp__context_t *ctx,
         transform->type = JEBP__TRANSFORM_NONE;
         return 0;
     }
-    transform->type = (jebp__transform_type_t)jebp__read_bits(ctx, 2);
+    transform->type = jebp__read_bits(ctx, 2);
     if (transform->type == JEBP__TRANSFORM_PALETTE) {
         // TODO: support palette images
         JEBP__ERROR(NOSUP_PALETTE);
