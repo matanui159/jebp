@@ -1047,7 +1047,7 @@ JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx,
 JEBP__INLINE jebp_color_t *jebp__index_subimage(jebp_image_t *image,
                                                 jebp_color_t *pixel,
                                                 jebp__subimage_t *subimage) {
-    jebp_int i = pixel - image->pixels;
+    jebp_int i = (jebp_int)(pixel - image->pixels);
     jebp_int x = i % image->width;
     jebp_int y = i / image->width;
     jebp_int j = (y >> subimage->block_bits) * subimage->width +
