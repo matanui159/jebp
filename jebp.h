@@ -565,35 +565,20 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 /**
  * JebP context
  */
-typedef struct jebp__chunk_t {
-    jebp_uint tag;
-    jebp_uint size;
-} jebp__chunk_t;
-
 #ifndef JEBP_NO_VP8L
-#define JEBP__NB_HUFFMAN_LENGTHS 16
-
 // A nice property about canonical huffman codes is that all codes of the same
 // length are increments of the previous code, meaning we can create a table
 // for each length which we can index to get the value.
-typedef struct jebp__huffman_table_t {
-    jebp_int min_code;
-    jebp_int max_code;
-    jebp_int *values;
-} jebp__huffman_table_t;
+// typedef struct jebp__huffman_table_t {
+//     jebp_int min_code;
+//     jebp_int max_code;
+//     jebp_int *values;
+// } jebp__huffman_table_t;
 
-typedef struct jebp__huffman_t {
-    jebp_int nb_values;
-    jebp__huffman_table_t tables[JEBP__NB_HUFFMAN_LENGTHS];
-} jebp__huffman_t;
-
-typedef struct jebp__huffman_group_t {
-    jebp__huffman_t main;
-    jebp__huffman_t red;
-    jebp__huffman_t blue;
-    jebp__huffman_t alpha;
-    jebp__huffman_t dist;
-} jebp__huffman_group_t;
+// typedef struct jebp__huffman_t {
+//     jebp_int nb_values;
+//     jebp__huffman_table_t tables[JEBP__NB_HUFFMAN_LENGTHS];
+// } jebp__huffman_t;
 
 typedef struct jebp__subimage_t {
     jebp_int width;
@@ -631,10 +616,6 @@ typedef struct jebp__context_t {
 #endif // JEBP_NO_STDIO
     jebp_int nb_bits;
     jebp_ubyte bits;
-
-    // RIFF
-    jebp__chunk_t webp_chunk;
-    jebp__chunk_t codec_chunk;
 
 #ifndef JEBP_NO_VP8L
     jebp_int colcache_bits;
@@ -693,24 +674,25 @@ static void jebp__free_context(jebp__context_t *ctx) {
 /**
  * Common utilities
  */
-JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
-                                             jebp_error_t err, jebp_int line) {
-#ifdef JEBP_LOG_ERRORS
-    fprintf(stderr, "line %i: %s\n", line, jebp_error_string(err));
-#else  // JEBP_LOG_ERRORS
-    (void)line;
-#endif // JEBP_LOG_ERRORS
-    jebp_free_image(ctx->image);
-#ifdef JEBP_ERROR
-    jebp__free_context(ctx);
-    JEBP_ERROR(err);
-#else  // JEBP_ERROR
-    ctx->error = err;
-    longjmp(ctx->jump, 1);
-#endif // JEBP_ERROR
-}
-#define JEBP__ERROR(err) jebp__error(ctx, JEBP_ERROR_##err, __LINE__)
+// JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
+//                                              jebp_error_t err, jebp_int line) {
+// #ifdef JEBP_LOG_ERRORS
+//     fprintf(stderr, "line %i: %s\n", line, jebp_error_string(err));
+// #else  // JEBP_LOG_ERRORS
+//     (void)line;
+// #endif // JEBP_LOG_ERRORS
+//     jebp_free_image(ctx->image);
+// #ifdef JEBP_ERROR
+//     jebp__free_context(ctx);
+//     JEBP_ERROR(err);
+// #else  // JEBP_ERROR
+//     ctx->error = err;
+//     longjmp(ctx->jump, 1);
+// #endif // JEBP_ERROR
+// }
+// #define JEBP__ERROR(err) jebp__error(ctx, JEBP_ERROR_##err, __LINE__)
 
+// #define JEBP__ERROR(a, b) ((a) == JEBP_OK ? (b) : (a))
 #define JEBP__MIN(a, b) ((a) < (b) ? (a) : (b))
 #define JEBP__MAX(a, b) ((a) > (b) ? (a) : (b))
 #define JEBP__ABS(a) ((a) < 0 ? -(a) : (a))
@@ -722,6 +704,13 @@ JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
     for (jebp_color_t *pixel = (image)->pixels,                                \
                       *end = pixel + (image)->width * (image)->height;         \
          pixel != end;)
+
+JEBP__INLINE jebp_error_t jebp__error(jebp_error_t *err, jebp_error_t error) {
+    if (*err == JEBP_OK) {
+        *err = error;
+    }
+    return *err;
+}
 
 // Currently only used by VP8L
 // TODO: after VP8(no-L) support is added, make it an error to remove both
@@ -741,99 +730,112 @@ static void jebp__alloc_image(jebp__context_t *ctx, jebp_image_t *image) {
  */
 #define JEBP__BUFFER_SIZE 4096
 
-static void jebp__check_buffer(jebp__context_t *ctx) {
-    if (ctx->nb_bytes == 0) {
+typedef struct jebp__reader_t {
+    size_t nb_bytes;
+    const jebp_ubyte *bytes;
 #ifndef JEBP_NO_STDIO
-        if (ctx->file == NULL) {
+    FILE *file;
+    void *buffer;
 #endif // JEBP_NO_STDIO
-            JEBP__ERROR(EOF);
+} jebp__reader_t;
+
+static void jebp__init_memory(jebp__reader_t *reader, size_t size, const void *data) {
+    reader->nb_bytes = size;
+    reader->bytes = data;
 #ifndef JEBP_NO_STDIO
-        }
-        ctx->nb_bytes = fread(ctx->buffer, 1, JEBP__BUFFER_SIZE, ctx->file);
-        ctx->bytes = ctx->buffer;
-        if (ferror(ctx->file)) {
-            JEBP__ERROR(IO);
-        }
-        if (ctx->nb_bytes == 0) {
-            JEBP__ERROR(EOF);
-        }
+    reader->file = NULL;
 #endif // JEBP_NO_STDIO
-    }
 }
 
-static void jebp__check_chunk(jebp__context_t *ctx, jebp__chunk_t *chunk,
-                              size_t size) {
-    if (chunk->tag != 0) {
-        if (size > chunk->size) {
-            JEBP__ERROR(INVDATA);
-        }
-        chunk->size -= (jebp_uint)size;
+#ifndef JEBP_NO_STDIO
+static jebp_error_t jebp__open_file(jebp__reader_t *reader, const char *path) {
+    reader->nb_bytes = 0;
+    reader->file = fopen(path, "rb");
+    if (reader->file == NULL) {
+        return JEBP_ERROR_IO;
     }
+    reader->buffer = JEBP_ALLOC(JEBP__BUFFER_SIZE);
+    if (reader->buffer == NULL) {
+        fclose(reader->file);
+        return JEBP_ERROR_NOMEM;
+    }
+    return JEBP_OK;
 }
 
-static void jebp__read_bytes(jebp__context_t *ctx, size_t size, void *data) {
-    ctx->nb_bits = 0;
-    jebp__check_chunk(ctx, &ctx->webp_chunk, size);
-    jebp__check_chunk(ctx, &ctx->codec_chunk, size);
-    jebp_byte *bytes = data;
+static void jebp__close_file(jebp__reader_t *reader) {
+    JEBP_FREE(reader->buffer);
+    fclose(reader->file);
+}
+#endif // JEBP_NO_STDIO
+
+static jebp_error_t jebp__buffer_bytes(jebp__reader_t *reader) {
+    if (reader->nb_bytes > 0) {
+        return JEBP_OK;
+    }
+#ifndef JEBP_NO_STDIO
+    if (reader->file != NULL) {
+        reader->nb_bytes = fread(reader->buffer, 1, JEBP__BUFFER_SIZE, reader->file);
+        reader->bytes = reader->buffer;
+        if (ferror(reader->file)) {
+            return JEBP_ERROR_IO;
+        }
+    }
+#endif // JEBP_NO_STDIO
+    if (reader->nb_bytes == 0) {
+        return JEBP_ERROR_EOF;
+    }
+    return JEBP_OK;
+}
+
+// TODO: Most reads are only a few bytes so maybe I should optimize for that
+static jebp_error_t jebp__read_bytes(jebp__reader_t *reader, size_t size, void *data) {
+    jebp_error_t err;
+    jebp_ubyte *bytes = data;
     while (size > 0) {
-        jebp__check_buffer(ctx);
-        size_t nb_bytes = JEBP__MIN(size, ctx->nb_bytes);
+        if ((err = jebp__buffer_bytes(reader)) != JEBP_OK) {
+            return err;
+        }
+        size_t nb_bytes = JEBP__MIN(size, reader->nb_bytes);
         if (bytes != NULL) {
-            memcpy(bytes, ctx->bytes, nb_bytes);
+            memcpy(bytes, reader->bytes, nb_bytes);
             bytes += nb_bytes;
         }
         size -= nb_bytes;
-        ctx->bytes += nb_bytes;
-        ctx->nb_bytes -= nb_bytes;
+        reader->nb_bytes -= nb_bytes;
+        reader->bytes += nb_bytes;
     }
+    return JEBP_OK;
 }
 
 // 8-bit uint reading is currently only used by the bit-reader
-#ifndef JEBP_NO_VP8L
-static jebp_ubyte jebp__read_uint8(jebp__context_t *ctx) {
-    ctx->nb_bits = 0;
-    jebp__check_chunk(ctx, &ctx->webp_chunk, 1);
-    jebp__check_chunk(ctx, &ctx->codec_chunk, 1);
-    jebp__check_buffer(ctx);
-    ctx->nb_bytes -= 1;
-    return *(ctx->bytes++);
+#if 0
+static jebp_ubyte jebp__read_uint8(jebp__reader_t *reader, jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+    if ((*err = jebp__buffer_reader(reader)) != JEBP_OK) {
+        return 0;
+    }
+    reader->nb_bytes -= 1;
+    return *(reader->bytes++);
 }
 #endif // JEBP_NO_VP8L
 
-static jebp_uint jebp__read_uint32(jebp__context_t *ctx) {
+static jebp_uint jebp__read_uint32(jebp__reader_t *reader, jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
 #ifdef JEBP__LITTLE_ENDIAN
     jebp_uint value = 0;
-    jebp__read_bytes(ctx, 4, &value);
+    *err = jebp__read_bytes(reader, 4, &value);
     return value;
 #else  // JEBP__LITTLE_ENDIAN
     jebp_ubyte bytes[4];
-    jebp__read_bytes(ctx, 4, bytes);
+    *err = jebp__read_bytes(ctx, 4, bytes);
     return (jebp_uint)bytes[0] | ((jebp_uint)bytes[1] << 8) |
            ((jebp_uint)bytes[2] << 16) | ((jebp_uint)bytes[3] << 24);
 #endif // JEBP__LITTLE_ENDIAN
 }
-
-// Bit-reading is only used by VP8L
-#ifndef JEBP_NO_VP8L
-static jebp_int jebp__read_bits(jebp__context_t *ctx, jebp_int size) {
-    jebp_int bits = 0;
-    jebp_int shift = 0;
-    while (size > 0) {
-        if (ctx->nb_bits == 0) {
-            ctx->bits = jebp__read_uint8(ctx);
-            ctx->nb_bits = 8;
-        }
-        jebp_int nb_bits = JEBP__MIN(size, ctx->nb_bits);
-        bits |= (ctx->bits & ((1 << nb_bits) - 1)) << shift;
-        shift += nb_bits;
-        size -= nb_bits;
-        ctx->bits >>= nb_bits;
-        ctx->nb_bits -= nb_bits;
-    }
-    return bits;
-}
-#endif // JEBP_NO_VP8L
 
 /**
  * RIFF container
@@ -841,90 +843,290 @@ static jebp_int jebp__read_bits(jebp__context_t *ctx, jebp_int size) {
 #define JEBP__RIFF_TAG 0x46464952
 #define JEBP__WEBP_TAG 0x50424557
 
-static void jebp__read_chunk(jebp__context_t *ctx, jebp__chunk_t *chunk) {
-    chunk->tag = 0;
-    jebp_uint tag = jebp__read_uint32(ctx);
-    chunk->size = jebp__read_uint32(ctx);
-    chunk->tag = tag;
+typedef struct jebp__chunk_t {
+    jebp_uint tag;
+    jebp_uint size;
+} jebp__chunk_t;
+
+typedef struct jebp__riff_reader_t {
+    jebp__reader_t *reader;
+    jebp__chunk_t header;
+} jebp__riff_reader_t;
+
+static jebp_error_t jebp__read_chunk(jebp__riff_reader_t *riff, jebp__chunk_t *chunk) {
+    jebp_error_t err = JEBP_OK;
+    chunk->tag = jebp__read_uint32(riff->reader, &err);
+    chunk->size = jebp__read_uint32(riff->reader, &err);
+    chunk->size += chunk->size % 2; // round up to even
+    return err;
 }
 
-static void jebp__read_header(jebp__context_t *ctx) {
-    jebp__read_chunk(ctx, &ctx->webp_chunk);
-    if (ctx->webp_chunk.tag != JEBP__RIFF_TAG) {
-        JEBP__ERROR(INVDATA_HEADER);
+static jebp_error_t jebp__read_riff_header(jebp__riff_reader_t *riff, jebp__reader_t *reader) {
+    jebp_error_t err;
+    riff->reader = reader;
+    if ((err = jebp__read_chunk(riff, &riff->header)) != JEBP_OK) {
+        return err;
     }
-    if (jebp__read_uint32(ctx) != JEBP__WEBP_TAG) {
-        JEBP__ERROR(INVDATA_HEADER);
+    if (riff->header.tag != JEBP__RIFF_TAG) {
+        return JEBP_ERROR_INVDATA_HEADER;
     }
-    jebp__read_chunk(ctx, &ctx->codec_chunk);
+    if (jebp__read_uint32(reader, &err) != JEBP__WEBP_TAG || err != JEBP_OK) {
+        return jebp__error(&err, JEBP_ERROR_INVDATA_HEADER);
+    }
+    return JEBP_OK;
+}
+
+static jebp_error_t jebp__read_riff_chunk(jebp__riff_reader_t *riff, jebp__chunk_t *chunk) {
+    jebp_error_t err;
+    if ((err = jebp__read_chunk(riff, chunk)) != JEBP_OK) {
+        return err;
+    }
+    if (chunk->size > riff->header.size) {
+        return JEBP_ERROR_INVDATA;
+    }
+    riff->header.size -= chunk->size;
+    return JEBP_OK;
+}
+
+/**
+ * Bit reader
+ */
+#ifndef JEBP_NO_VP8L
+typedef struct jebp__bit_reader_t {
+    jebp__reader_t *reader;
+    size_t nb_bytes;
+    jebp_int nb_bits;
+    jebp_uint bits;
+} jebp__bit_reader_t;
+
+static void jepb__init_bit_reader(jebp__bit_reader_t *bits, jebp__reader_t *reader, size_t size) {
+    bits->reader = reader;
+    reader->nb_bytes = size;
+    bits->nb_bits = 0;
+    bits->bits = 0;
+}
+
+static jebp_error_t jebp__buffer_bits(jebp__bit_reader_t *bits) {
+    jebp_error_t err;
+    size_t nb_bytes = JEBP__MIN((32 - bits->nb_bits) / 8, bits->nb_bytes);
+#ifdef JEBP__LITTLE_ENDIAN
+    jebp_uint value = 0;
+    err = jebp__read_bytes(bits->reader, nb_bytes, &value);
+    bits->bits |= value << bits->nb_bits;
+    bits->nb_bits += nb_bytes * 8;
+#else // JEBP__LITTLE_ENDIAN
+    jebp_ubyte bytes[4];
+    err = jebp__read_bytes(bits->reader, nb_bytes, bytes);
+    for (size_t i = 0; i < nb_bytes; i += 1) {
+        bits->bits |= bytes[i] << bits->nb_bits;
+        bits->nb_bits += 8;
+    }
+#endif
+    bits->nb_bytes -= nb_bytes;
+    if (err != JEBP_OK) {
+        return err;
+    }
+    return JEBP_OK;
+}
+
+// TODO: Can't decide if this should return int or uint
+static jebp_uint jepb__peek_bits(jebp__bit_reader_t *bits, jebp_int size, jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+    if (size > bits->nb_bits) {
+        if ((*err = jebp__buffer_bits(bits)) != JEBP_OK) {
+            return 0;
+        }
+    }
+    return bits->bits & ((1 << size) - 1);
+}
+
+// Only should be used after a peek since it doesn't check the buffer
+JEBP__INLINE void jebp__skip_bits(jebp__bit_reader_t *bits, jebp_int size) {
+    bits->nb_bits -= size;
+    bits->nb_bytes >>= size;
+}
+
+static jebp_uint jebp__read_bits(jebp__bit_reader_t *bits, jebp_int size, jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+    jebp_uint value = jepb__peek_bits(bits, size, err);
+    jebp__skip_bits(bits, size);
+    return value;
 }
 
 /**
  * Huffman coding
  */
-#ifndef JEBP_NO_VP8L
+#define JEBP__MAX_HUFFMAN_LENGTH 15
+#define JEBP__MAX_PRIMARY_LENGTH 8
+#define JEBP__MAX_SECONDARY_LENGTH (JEBP__MAX_HUFFMAN_LENGTH - JEBP__MAX_PRIMARY_LENGTH)
+#define JEBP__NB_PRIMARY_HUFFMANS (1 << JEBP__MAX_PRIMARY_LENGTH)
+#define JEBP__SECONDARY_MASK ((1 << JEBP__MAX_SECONDARY_LENGTH) - 1)
+#define JEBP__NO_HUFFMAN_SYMBOL 0xffff
+
 #define JEBP__NB_META_SYMBOLS 19
 #define JEBP__NB_COLOR_SYMBOLS 256
 #define JEBP__NB_LENGTH_SYMBOLS 24
 #define JEBP__NB_DIST_SYMBOLS 40
 #define JEBP__NB_MAIN_SYMBOLS (JEBP__NB_COLOR_SYMBOLS + JEBP__NB_LENGTH_SYMBOLS)
 
-static const jebp_int jebp__meta_length_order[JEBP__NB_META_SYMBOLS];
+// The huffman decoding is done in one or two steps, both using a lookup table.
+// These tables are called the "primary" table and "secondary" tables. First
+// 8-bits are peeked from the stream to index the primary table. If the symbol
+// is in this table (indicated by length <= 8) then the symbol from that is used
+// and the length is used to skip that many bits. Codes which are smaller than
+// 8-bits are represented by filling the table such that any index with a prefix
+// of the given code will have the same entry. If the symbol requires more bits
+// (indiciated by length > 8) then the symbol is used as an offset pointing to
+// the secondary table which has an index size of (length - 8) bits.
+typedef struct jebp__huffman_t {
+    // <= 8: length is the number of bits actually used, and symbol is the
+    //       decoded symbol or `JEBP__NO_HUFFMAN_SYMBOL` for an invalid code.
+    // >  8: length is the maximum number of bits for any code with this prefix,
+    //       and symbol is the offset in the array to the secondary table.
+    jebp_short length;
+    jebp_ushort symbol;
+} jebp__huffman_t;
 
-static void jebp__build_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman,
-                                jebp_int nb_lengths) {
-    jebp__huffman_table_t *table = huffman->tables;
-    table->min_code = 0;
-    table->max_code = 0;
-    if (nb_lengths > huffman->nb_values) {
-        JEBP_FREE(table->values);
-        table->values = JEBP_ALLOC(nb_lengths * sizeof(jebp_int));
-        if (table->values == NULL) {
-            JEBP__ERROR(NOMEM);
-        }
-        huffman->nb_values = nb_lengths;
+typedef struct jebp__huffman_group_t {
+    jebp__huffman_t *main;
+    jebp__huffman_t *red;
+    jebp__huffman_t *blue;
+    jebp__huffman_t *alpha;
+    jebp__huffman_t *dist;
+} jebp__huffman_group_t;
+
+static const jebp_byte jebp__meta_length_order[JEBP__NB_META_SYMBOLS];
+
+// This function is a bit confusing so I have attempted to document it well
+static jebp_error_t jebp__alloc_huffman(jebp__huffman_t **huffmans, jebp_int nb_lengths, const jebp_byte *lengths) {
+    // Stack allocate the primary table and set it all to invalid values
+    jebp__huffman_t primary[JEBP__NB_PRIMARY_HUFFMANS];
+    for (jebp_int i = 0; i < JEBP__NB_PRIMARY_HUFFMANS; i += 1) {
+        primary[i].symbol = JEBP__NO_HUFFMAN_SYMBOL;
     }
 
-    // TODO: do we have to check for invalid huffman trees?
-    //       hypothetically it should still generate "valid" codes...
-    jebp_int *values = table->values;
+    // Fill in the 8-bit codes in the primary table
+    jebp_int len = 1;
+    jebp_int code = 0;
     jebp_int nb_used = 0;
-    for (jebp_int i = 1; i < JEBP__NB_HUFFMAN_LENGTHS; i += 1) {
-        table[1].min_code = table->max_code << 1;
-        table += 1;
-        table->max_code = table->min_code;
-        table->values = values;
-        for (jebp_int j = 0; j < nb_lengths; j += 1) {
-            if (ctx->lengths[j] == i) {
-                *(values++) = j;
-                table->max_code += 1;
-                nb_used += 1;
+    for (; len <= JEBP__MAX_PRIMARY_LENGTH; len += 1) {
+        for (jebp_int i = 0; i < nb_lengths; i += 1) {
+            if (lengths[i] != len) {
+                continue;
+            }
+            if (code >> JEBP__MAX_PRIMARY_LENGTH) {
+                return JEBP_ERROR_INVDATA;
+            }
+            nb_used += 1;
+            jebp_int end = code + (1 << (JEBP__MAX_PRIMARY_LENGTH - len));
+            for (; code < end; code += 1) {
+                primary[code].length = len;
+                primary[code].symbol = i;
             }
         }
     }
-    if (nb_used <= 1) {
-        // Special case: if there is only one value, it will have length 0
-        huffman->tables[0].max_code = nb_used;
-    }
-}
 
-// There are faster/nicer ways to decode huffman codes but they often require
-// peeking the next n bits which is not easy with how the reader was designed.
-static jebp_int jebp__read_symbol(jebp__context_t *ctx,
-                                  jebp__huffman_t *huffman) {
-    jebp__huffman_table_t *table = huffman->tables;
-    if (table->max_code > 0) {
-        return table->values[0];
-    }
-    jebp_int code = 0;
-    for (jebp_int i = 1; i < JEBP__NB_HUFFMAN_LENGTHS; i += 1) {
-        table += 1;
-        code = (code << 1) | jebp__read_bits(ctx, 1);
-        if (code < table->max_code) {
-            return table->values[code - table->min_code];
+    // Fill in the secondary table lengths in the primary table
+    code <<= JEBP__MAX_SECONDARY_LENGTH;
+    jebp_int secondary_code = code;
+    for (; len <= JEBP__MAX_HUFFMAN_LENGTH; len += 1, code <<= 1) {
+        for (jebp_int i = 0; i < nb_lengths; i += 1) {
+            if (lengths[i] != len) {
+                continue;
+            }
+            if (code >> JEBP__MAX_HUFFMAN_LENGTH) {
+                return JEBP_ERROR_INVDATA;
+            }
+            nb_used += 1;
+            jebp_int prefix = code >> JEBP__MAX_SECONDARY_LENGTH;
+            primary[prefix].length = len;
+            code += 1 << (JEBP__MAX_HUFFMAN_LENGTH - len);
         }
     }
-    JEBP__ERROR(INVDATA);
+    if (nb_used <= 1) {
+        // Special case: if there is only one symbol don't decode any bits
+        *huffmans = NULL;
+        return JEBP_OK; 
+    }
+
+    // Calculate the total no. of huffman entries and fill in the secondary
+    // table offsets
+    jebp_int nb_huffmans = JEBP__NB_PRIMARY_HUFFMANS;
+    for (jebp_int i = 0; i < JEBP__NB_PRIMARY_HUFFMANS; i += 1) {
+        jebp_int suffix = primary[i].length - JEBP__MAX_PRIMARY_LENGTH;
+        if (suffix > 0) {
+            primary[i].symbol = nb_huffmans;
+            nb_huffmans += 1 << suffix;
+        }
+    }
+
+    // Allocate, copy over the primary table, and assign the rest to invalid
+    // values
+    *huffmans = JEBP_ALLOC(nb_huffmans * sizeof(jebp__huffman_t));
+    if (*huffmans == NULL) {
+        return JEBP_ERROR_NOMEM;
+    }
+    memcpy(*huffmans, primary, sizeof(primary));
+    if (nb_huffmans == JEBP__NB_PRIMARY_HUFFMANS) {
+        // Special case: we can stop here if we don't have to fill any secondary
+        //               tables
+        return JEBP_OK;
+    }
+    for (jebp_int i = JEBP__NB_PRIMARY_HUFFMANS; i < nb_huffmans; i += 1) {
+        (*huffmans[i]).symbol = JEBP__NO_HUFFMAN_SYMBOL;
+    }
+
+    // Fill in the secondary tables
+    len = JEBP__NB_PRIMARY_HUFFMANS + 1;
+    code = secondary_code;
+    for (; len <= JEBP__MAX_HUFFMAN_LENGTH; len += 1) {
+        for (jebp_int i = 0; i < nb_lengths; i += 1) {
+            if (lengths[i] != len) {
+                continue;
+            }
+            jebp_int prefix = code >> JEBP__MAX_SECONDARY_LENGTH;
+            jebp_int suffix = code & JEBP__SECONDARY_MASK;
+            suffix >>= JEBP__MAX_SECONDARY_LENGTH - primary[prefix].length;
+            jebp__huffman_t *secondary = &(*huffmans)[primary[prefix].symbol];
+            jebp_int end = code + (1 << (primary[prefix].length - len));
+            for (; code != end; code += 1, suffix += 1) {
+                secondary[suffix].length = len;
+                secondary[suffix].symbol = i;
+            }
+        }
+    }
+    return JEBP_OK;
+}
+
+static jebp_int jebp__read_symbol(jebp__huffman_t *huffmans, jebp__bit_reader_t *bits, jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+    jebp_int code = jepb__peek_bits(bits, JEBP__MAX_PRIMARY_LENGTH, err);
+    if (*err != JEBP_OK || huffmans[code].symbol == JEBP__NO_HUFFMAN_SYMBOL) {
+        jebp__error(err, JEBP_ERROR_INVDATA);
+        return 0;
+    }
+    jebp_int length = huffmans[code].length;
+    jebp_int suffix = length - JEBP__MAX_PRIMARY_LENGTH;
+    if (suffix <= 0) {
+        jebp__skip_bits(bits, length);
+        return huffmans[code].symbol;
+    }
+
+    huffmans += huffmans[code].symbol;
+    jebp__skip_bits(bits, JEBP__MAX_PRIMARY_LENGTH);
+    code = jepb__peek_bits(bits, suffix, err);
+    if (*err != JEBP_OK || huffmans[code].symbol == JEBP__NO_HUFFMAN_SYMBOL) {
+        jebp__error(err, JEBP_ERROR_INVDATA);
+        return 0;
+    }
+    jebp__skip_bits(bits, huffmans[code].length - JEBP__MAX_PRIMARY_LENGTH);
+    return huffmans[code].symbol;
 }
 
 static void jebp__read_huffman(jebp__context_t *ctx, jebp__huffman_t *huffman,
@@ -1630,7 +1832,7 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path) {
 // unimportant to the developer.
 #ifndef JEBP_NO_VP8L
 // The order that meta lengths are read
-static const jebp_int jebp__meta_length_order[JEBP__NB_META_SYMBOLS] = {
+static const jebp_byte jebp__meta_length_order[JEBP__NB_META_SYMBOLS] = {
     17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 
 // {X, Y} offsets from the pixel when decoding short distance codes
