@@ -448,10 +448,6 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #elif !defined(JEBP_ALLOC) || !defined(JEBP_FREE)
 #error "Both JEBP_ALLOC and JEBP_FREE have to be defined"
 #endif
-#ifndef JEBP_ERROR
-#include <setjmp.h>
-#endif // JEBP_ERROR
-#define JEBP__CLEAR(ptr, size) memset(ptr, 0, size)
 
 /**
  * Predefined macro detection
@@ -563,103 +559,6 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #endif // JEBP__SIMD_NEON
 
 /**
- * JebP context
- */
-#ifndef JEBP_NO_VP8L
-// A nice property about canonical huffman codes is that all codes of the same
-// length are increments of the previous code, meaning we can create a table
-// for each length which we can index to get the value.
-// typedef struct jebp__huffman_table_t {
-//     jebp_int min_code;
-//     jebp_int max_code;
-//     jebp_int *values;
-// } jebp__huffman_table_t;
-
-// typedef struct jebp__huffman_t {
-//     jebp_int nb_values;
-//     jebp__huffman_table_t tables[JEBP__NB_HUFFMAN_LENGTHS];
-// } jebp__huffman_t;
-
-typedef struct jebp__subimage_t {
-    jebp_int width;
-    jebp_int height;
-    jebp_color_t *pixels;
-    jebp_int block_bits;
-} jebp__subimage_t;
-
-typedef enum jebp__transform_type_t {
-    JEBP__TRANSFORM_NONE = -1,
-    JEBP__TRANSFORM_PREDICT,
-    JEBP__TRANSFORM_COLOR,
-    JEBP__TRANSFORM_GREEN,
-    JEBP__TRANSFORM_PALETTE,
-    JEBP__NB_TRANSFORMS
-} jebp__transform_type_t;
-
-typedef struct jebp__transform_t {
-    jebp__transform_type_t type;
-    jebp__subimage_t image;
-} jebp__transform_t;
-#endif // JEBP_NO_VP8L
-
-typedef struct jebp__context_t {
-#ifndef JEBP_ERROR
-    jebp_error_t error;
-    jmp_buf jump;
-#endif // JEBP_ERROR
-    jebp_image_t *image;
-    size_t nb_bytes;
-    const jebp_byte *bytes;
-#ifndef JEBP_NO_STDIO
-    FILE *file;
-    void *buffer;
-#endif // JEBP_NO_STDIO
-    jebp_int nb_bits;
-    jebp_ubyte bits;
-
-#ifndef JEBP_NO_VP8L
-    jebp_int colcache_bits;
-    jebp_color_t *colcache;
-    jebp_int nb_lengths;
-    jebp_int *lengths;
-    jebp_int nb_groups;
-    jebp__huffman_group_t *groups;
-    jebp__transform_t transforms[JEBP__NB_TRANSFORMS];
-    jebp__subimage_t huffman_image;
-#endif // JEBP_NO_VP8L
-} jebp__context_t;
-
-static jebp__context_t *jebp__alloc_context(void) {
-    jebp__context_t *ctx = JEBP_ALLOC(sizeof(jebp__context_t));
-    if (ctx == NULL) {
-        return NULL;
-    }
-    JEBP__CLEAR(ctx, sizeof(jebp__context_t));
-    return ctx;
-}
-
-static void jebp__free_context(jebp__context_t *ctx) {
-    (void)ctx;
-#ifndef JEBP_NO_STDIO
-    if (ctx->file != NULL) {
-        fclose(ctx->file);
-    }
-    JEBP_FREE(ctx->buffer);
-#endif // JEBP_NO_STDIO
-
-#ifndef JEBP_NO_VP8L
-    JEBP_FREE(ctx->colcache);
-    JEBP_FREE(ctx->lengths);
-    jebp__free_context_groups(ctx);
-    for (jebp_int i = 0; i < JEBP__NB_TRANSFORMS; i += 1) {
-        JEBP_FREE(ctx->transforms[i].image.pixels);
-    }
-    JEBP_FREE(ctx->huffman_image.pixels);
-#endif // JEBP_NO_VP8L
-    JEBP_FREE(ctx);
-}
-
-/**
  * Common utilities
  */
 #define JEBP__MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -669,6 +568,7 @@ static void jebp__free_context(jebp__context_t *ctx) {
 #define JEBP__CEIL_SHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
 #define JEBP__CLAMP(x, min, max) JEBP__MIN(JEBP__MAX(x, min), max)
 #define JEBP__CLAMP_UBYTE(x) JEBP__CLAMP(x, 0, 255)
+#define JEBP__CLEAR(ptr, size) memset(ptr, 0, size)
 
 JEBP__INLINE jebp_error_t jebp__error(jebp_error_t *err, jebp_error_t error) {
     if (*err == JEBP_OK) {
@@ -1302,6 +1202,13 @@ static void jebp__colcache_insert(jebp__colcache_t *colcache,
  */
 #define JEBP__NB_VP8L_OFFSETS 120
 
+typedef struct jebp__subimage_t {
+    jebp_int width;
+    jebp_int height;
+    jebp_color_t *pixels;
+    jebp_int block_bits;
+} jebp__subimage_t;
+
 static const jebp_byte jebp__vp8l_offsets[JEBP__NB_VP8L_OFFSETS][2];
 
 JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__bit_reader_t *bits,
@@ -1630,92 +1537,116 @@ static const jebp__vp8l_pred_t jebp__vp8l_preds[JEBP__NB_VP8L_PRED_TYPES] = {
 /**
  * VP8L transforms
  */
-// returns 0 if there are no more transforms to read
-static jebp_int jebp__read_transform(jebp__context_t *ctx,
-                                     jebp__transform_t *transform) {
-    if (!jebp__read_bits(ctx, 1)) {
+typedef enum jebp__transform_type_t {
+    JEBP__TRANSFORM_NONE = -1,
+    JEBP__TRANSFORM_PREDICT,
+    JEBP__TRANSFORM_COLOR,
+    JEBP__TRANSFORM_GREEN,
+    JEBP__TRANSFORM_PALETTE,
+    JEBP__NB_TRANSFORMS
+} jebp__transform_type_t;
+
+typedef struct jebp__transform_t {
+    jebp__transform_type_t type;
+    jebp__subimage_t image;
+} jebp__transform_t;
+
+// <  0: no more transforms to read
+// >= 0: ok or error code
+static jebp_int jebp__read_transform(jebp__transform_t *transform, jebp__bit_reader_t *bits, jebp_image_t *image) {
+    jebp_error_t err = JEBP_OK;
+    if (!jebp__read_bits(bits, 1, &err)) {
         // no more transforms to read
         transform->type = JEBP__TRANSFORM_NONE;
-        return 0;
+        return err == JEBP_OK ? -1 : err;
     }
-    transform->type = jebp__read_bits(ctx, 2);
+    transform->type = jebp__read_bits(bits, 2, &err);
+    if (err != JEBP_OK) {
+        return err;
+    }
     if (transform->type == JEBP__TRANSFORM_PALETTE) {
         // TODO: support palette images
-        JEBP__ERROR(NOSUP_PALETTE);
+        return JEBP_ERROR_NOSUP_PALETTE;
     } else if (transform->type != JEBP__TRANSFORM_GREEN) {
-        jebp__read_subimage(ctx, &transform->image);
+        err = jebp__read_subimage(&transform->image, bits, image);
     }
-    return 1;
+    return err;
 }
 
-JEBP__INLINE void jebp__apply_predict_transform(jebp__context_t *ctx,
-                                                jebp__subimage_t *image) {
-    JEBP__LOOP_IMAGE(ctx->image) {
-        jebp_color_t *l = pixel - 1;
-        jebp_color_t *t = pixel - ctx->image->width;
-        if (pixel == ctx->image->pixels) {
-            // Use opaque-black prediction for top-left pixel
-            jebp__vp8l_pred_black(pixel);
-        } else if (t < ctx->image->pixels) {
-            // Use left prediction for the top row
-            jebp__vp8l_pred_left(pixel, l);
-        } else if ((pixel - ctx->image->pixels) % ctx->image->width == 0) {
-            // Use top prediction for left row
-            jebp__vp8l_pred_top(pixel, t);
-        } else {
-            jebp_int predict =
-                jebp__index_subimage(ctx->image, pixel, image)->g;
-            if (predict >= JEBP__NB_VP8L_PRED_TYPES) {
-                JEBP__ERROR(INVDATA);
-            }
-            jebp__vp8l_preds[predict](pixel, l, t);
-        }
-        pixel += 1;
+static void jebp__free_transform(jebp__transform_t *transform) {
+    if (transform->type != JEBP__TRANSFORM_GREEN) {
+        jebp_free_image((jebp_image_t *)&transform->image);
     }
 }
 
-JEBP__INLINE jebp_ubyte jebp__apply_color_delta(jebp_ubyte color,
-                                                jebp_ubyte delta) {
-    return ((jebp_byte)color * (jebp_byte)delta) >> 5;
-}
+// JEBP__INLINE void jebp__apply_predict_transform(jebp__context_t *ctx,
+//                                                 jebp__subimage_t *image) {
+//     JEBP__LOOP_IMAGE(ctx->image) {
+//         jebp_color_t *l = pixel - 1;
+//         jebp_color_t *t = pixel - ctx->image->width;
+//         if (pixel == ctx->image->pixels) {
+//             // Use opaque-black prediction for top-left pixel
+//             jebp__vp8l_pred_black(pixel);
+//         } else if (t < ctx->image->pixels) {
+//             // Use left prediction for the top row
+//             jebp__vp8l_pred_left(pixel, l);
+//         } else if ((pixel - ctx->image->pixels) % ctx->image->width == 0) {
+//             // Use top prediction for left row
+//             jebp__vp8l_pred_top(pixel, t);
+//         } else {
+//             jebp_int predict =
+//                 jebp__index_subimage(ctx->image, pixel, image)->g;
+//             if (predict >= JEBP__NB_VP8L_PRED_TYPES) {
+//                 JEBP__ERROR(INVDATA);
+//             }
+//             jebp__vp8l_preds[predict](pixel, l, t);
+//         }
+//         pixel += 1;
+//     }
+// }
 
-JEBP__INLINE void jebp__apply_color_transform(jebp__context_t *ctx,
-                                              jebp__subimage_t *image) {
-    JEBP__LOOP_IMAGE(ctx->image) {
-        jebp_color_t *delta = jebp__index_subimage(ctx->image, pixel, image);
-        pixel->r += jebp__apply_color_delta(pixel->g, delta->b);
-        pixel->b += jebp__apply_color_delta(pixel->g, delta->g);
-        pixel->b += jebp__apply_color_delta(pixel->r, delta->r);
-        pixel += 1;
-    }
-}
+// JEBP__INLINE jebp_ubyte jebp__apply_color_delta(jebp_ubyte color,
+//                                                 jebp_ubyte delta) {
+//     return ((jebp_byte)color * (jebp_byte)delta) >> 5;
+// }
 
-JEBP__INLINE void jebp__apply_green_transform(jebp__context_t *ctx) {
-    JEBP__LOOP_IMAGE(ctx->image) {
-        pixel->r += pixel->g;
-        pixel->b += pixel->g;
-        pixel += 1;
-    }
-}
+// JEBP__INLINE void jebp__apply_color_transform(jebp__context_t *ctx,
+//                                               jebp__subimage_t *image) {
+//     JEBP__LOOP_IMAGE(ctx->image) {
+//         jebp_color_t *delta = jebp__index_subimage(ctx->image, pixel, image);
+//         pixel->r += jebp__apply_color_delta(pixel->g, delta->b);
+//         pixel->b += jebp__apply_color_delta(pixel->g, delta->g);
+//         pixel->b += jebp__apply_color_delta(pixel->r, delta->r);
+//         pixel += 1;
+//     }
+// }
 
-static void jebp__apply_transform(jebp__context_t *ctx,
-                                  jebp__transform_t *transform) {
-    switch (transform->type) {
-    case JEBP__TRANSFORM_NONE:
-        break;
-    case JEBP__TRANSFORM_PREDICT:
-        jebp__apply_predict_transform(ctx, &transform->image);
-        break;
-    case JEBP__TRANSFORM_COLOR:
-        jebp__apply_color_transform(ctx, &transform->image);
-        break;
-    case JEBP__TRANSFORM_GREEN:
-        jebp__apply_green_transform(ctx);
-        break;
-    default:
-        JEBP__ERROR(NOSUP);
-    }
-}
+// JEBP__INLINE void jebp__apply_green_transform(jebp__context_t *ctx) {
+//     JEBP__LOOP_IMAGE(ctx->image) {
+//         pixel->r += pixel->g;
+//         pixel->b += pixel->g;
+//         pixel += 1;
+//     }
+// }
+
+// static void jebp__apply_transform(jebp__context_t *ctx,
+//                                   jebp__transform_t *transform) {
+//     switch (transform->type) {
+//     case JEBP__TRANSFORM_NONE:
+//         break;
+//     case JEBP__TRANSFORM_PREDICT:
+//         jebp__apply_predict_transform(ctx, &transform->image);
+//         break;
+//     case JEBP__TRANSFORM_COLOR:
+//         jebp__apply_color_transform(ctx, &transform->image);
+//         break;
+//     case JEBP__TRANSFORM_GREEN:
+//         jebp__apply_green_transform(ctx);
+//         break;
+//     default:
+//         JEBP__ERROR(NOSUP);
+//     }
+// }
 
 /**
  * VP8L lossless codec
@@ -1723,49 +1654,86 @@ static void jebp__apply_transform(jebp__context_t *ctx,
 #define JEBP__VP8L_TAG 0x4c385056
 #define JEBP__VP8L_MAGIC 0x2f
 
-static void jebp__read_vp8l_header(jebp__context_t *ctx) {
-    if (jebp__read_uint8(ctx) != JEBP__VP8L_MAGIC) {
-        JEBP__ERROR(INVDATA_HEADER);
+static jebp_error_t jebp__read_vp8l_header(jebp_image_t *image, jebp__reader_t *reader, jebp__bit_reader_t *bits, jebp__chunk_t *chunk) {
+    jebp_error_t err = JEBP_OK;
+    if (chunk->size < 5) {
+        return JEBP_ERROR_INVDATA_HEADER;
     }
-    ctx->image->width = jebp__read_bits(ctx, 14) + 1;
-    ctx->image->height = jebp__read_bits(ctx, 14) + 1;
-    jebp__read_bits(ctx, 1); // alpha does not impact decoding
-    if (jebp__read_bits(ctx, 3) != 0) {
+    if (jebp__read_uint8(reader, &err) != JEBP__VP8L_MAGIC) {
+        return jebp__error(&err, JEBP_ERROR_INVDATA_HEADER);
+    }
+    jepb__init_bit_reader(bits, reader, chunk->size - 5);
+    image->width = jebp__read_bits(bits, 14, &err) + 1;
+    image->height = jebp__read_bits(bits, 14, &err) + 1;
+    jebp__read_bits(bits, 1, &err); // alpha does not impact decoding
+    if (jebp__read_bits(bits, 3, &err) != 0) {
         // version must be 0
-        JEBP__ERROR(NOSUP);
+        return jebp__error(&err, JEBP_ERROR_NOSUP);
     }
+    return err;
 }
 
-static void jebp__read_vp8l_nohead(jebp__context_t *ctx) {
-    jebp_int cont = 1;
-    for (int i = 0; i < JEBP__NB_TRANSFORMS; i += 1) {
-        if (cont) {
-            cont = jebp__read_transform(ctx, &ctx->transforms[i]);
-        } else {
-            ctx->transforms[i].type = JEBP__TRANSFORM_NONE;
+static jebp_error_t jebp__read_vp8l_nohead(jebp_image_t *image, jebp__reader_t *bits) {
+    jebp_error_t err = JEBP_OK;
+    jebp_int ret;
+    jebp__transform_t transforms[4];
+    jebp_int nb_transforms = 0;
+    for (; nb_transforms < JEBP__NB_TRANSFORMS; nb_transforms += 1) {
+        if ((ret = jebp__read_transform(&transforms[nb_transforms], bits, image)) != JEBP_OK) {
+            break;
         }
     }
-    if (cont && jebp__read_bits(ctx, 1)) {
+    if (ret == 0 && jebp__read_bits(bits, 1, &err)) {
         // there can only be 4 transforms at most
-        JEBP__ERROR(INVDATA);
+        ret = JEBP_ERROR_INVDATA;
+    }
+    if (err != JEBP_OK || ret > JEBP_OK) {
+        jebp__error(&err, ret);
+        goto free_transforms;
     }
 
-    jebp_int colcache_bits = jebp__read_colcache(ctx);
-    jebp__subimage_t *huffman_image = NULL;
-    if (jebp__read_bits(ctx, 1)) {
-        // there is a huffman image
-        huffman_image = &ctx->huffman_image;
-        jebp__read_subimage(ctx, huffman_image);
+    jebp__colcache_t colcache;
+    if ((err = jebp__read_colcache(&colcache, bits)) != JEBP_OK) {
+        goto free_transforms;
     }
-    jebp__read_vp8l_image(ctx, ctx->image, colcache_bits, huffman_image);
-    for (int i = JEBP__NB_TRANSFORMS - 1; i >= 0; i -= 1) {
-        jebp__apply_transform(ctx, &ctx->transforms[i]);
+    jebp__subimage_t *huffman_image = &(jebp__subimage_t){0};
+    if (!jebp__read_bits(bits, 1, &err)) {
+        // there is no huffman image
+        huffman_image = NULL;
     }
+    if (err != JEBP_OK) {
+        goto free_colcache;
+    }
+    if (huffman_image != NULL) {
+        if ((err = jebp__read_subimage(huffman_image, bits, image)) != JEBP_OK) {
+            goto free_colcache;
+        }
+    }
+    err = jebp__read_vp8l_image(image, bits, &colcache, huffman_image);
+
+    // TODO: apply transforms
+    // for (int i = JEBP__NB_TRANSFORMS - 1; i >= 0; i -= 1) {
+    //     jebp__apply_transform(ctx, &ctx->transforms[i]);
+    // }
+free_colcache:
+    jebp__free_colcache(&colcache);
+free_transforms:
+    for (nb_transforms -= 1; nb_transforms >= 0; nb_transforms -= 1) {
+        jebp__free_transform(&transforms[nb_transforms]);
+    }
+    return err;
 }
 
-static void jebp__read_vp8l(jebp__context_t *ctx) {
-    jebp__read_vp8l_header(ctx);
-    jebp__read_vp8l_nohead(ctx);
+static jebp_error_t jebp__read_vp8l(jebp_image_t *image, jebp__reader_t *reader, jebp__chunk_t *chunk) {
+    jebp_error_t err;
+    jebp__bit_reader_t bits;
+    if ((err = jebp__read_vp8l_header(image, reader, &bits, chunk)) != JEBP_OK) {
+        return err;
+    }
+    if ((err = jebp__read_vp8l_nohead(image, &bits)) != JEBP_OK) {
+        return err;
+    }
+    return JEBP_OK;
 }
 #endif // JEBP_NO_VP8L
 
@@ -1788,41 +1756,27 @@ void jebp_free_image(jebp_image_t *image) {
     }
 }
 
-static jebp_error_t jebp__memory_context(jebp__context_t **ptr,
-                                         jebp_image_t *image, size_t size,
-                                         const void *data) {
-    jebp__context_t *ctx = jebp__alloc_context();
-    if (ctx == NULL) {
-        return JEBP_ERROR_NOMEM;
-    }
-    ctx->image = image;
-    ctx->nb_bytes = size;
-    ctx->bytes = data;
-    *ptr = ctx;
-    return JEBP_OK;
-}
-
-static jebp_error_t jebp__read_size(jebp__context_t *ctx) {
-#ifndef JEBP_ERROR
-    if (setjmp(ctx->jump)) {
-        jebp_error_t err = ctx->error;
-        jebp__free_context(ctx);
+static jebp_error_t jebp__read_size(jebp_image_t *image, jebp__reader_t *reader) {
+    jebp_error_t err;
+    jebp__riff_reader_t riff;
+    JEBP__CLEAR(image, sizeof(jebp_image_t));
+    if ((err = jebp__read_riff_header(&riff, reader)) != JEBP_OK) {
         return err;
     }
-#endif // JEBP_ERROR
-    ctx->image->pixels = NULL;
-    jebp__read_header(ctx);
-    switch (ctx->codec_chunk.tag) {
+    jebp__chunk_t chunk;
+    if ((err = jebp__read_riff_chunk(&riff, &chunk)) != JEBP_OK) {
+        return err;
+    }
+
+    switch (chunk.tag) {
 #ifndef JEBP_NO_VP8L
-    case JEBP__VP8L_TAG:
-        jebp__read_vp8l_header(ctx);
-        break;
+    case JEBP__VP8L_TAG:;
+        jebp__bit_reader_t bits;
+        return jebp__read_vp8l_header(image, reader, &bits, &chunk);
 #endif // JEBP_NO_VP8L
     default:
-        JEBP__ERROR(NOSUP_CODEC);
+        return JEBP_ERROR_NOSUP_CODEC;
     }
-    jebp__free_context(ctx);
-    return JEBP_OK;
 }
 
 jebp_error_t jebp_decode_size(jebp_image_t *image, size_t size,
@@ -1830,93 +1784,69 @@ jebp_error_t jebp_decode_size(jebp_image_t *image, size_t size,
     if (image == NULL || data == NULL) {
         return JEBP_ERROR_INVAL;
     }
-    jebp__context_t *ctx;
-    jebp_error_t err = jebp__memory_context(&ctx, image, size, data);
-    if (err != JEBP_OK) {
-        return err;
-    }
-    return jebp__read_size(ctx);
+    jebp__reader_t reader;
+    jebp__init_memory(&reader, size, data);
+    return jebp__read_size(image, &reader);
 }
 
-static jebp_error_t jebp__read(jebp__context_t *ctx) {
-#ifndef JEBP_ERROR
-    if (setjmp(ctx->jump)) {
-        jebp_error_t err = ctx->error;
-        jebp__free_context(ctx);
+static jebp_error_t jebp__read(jebp_image_t *image, jebp__reader_t *reader) {
+    jebp_error_t err;
+    jebp__riff_reader_t riff;
+    JEBP__CLEAR(image, sizeof(jebp_image_t));
+    if ((err = jebp__read_riff_header(&riff, reader)) != JEBP_OK) {
         return err;
     }
-#endif // JEBP_ERROR
-    ctx->image->pixels = NULL;
-    jebp__read_header(ctx);
-    switch (ctx->codec_chunk.tag) {
+    jebp__chunk_t chunk;
+    if ((err = jebp__read_riff_chunk(&riff, &chunk)) != JEBP_OK) {
+        return err;
+    }
+
+    switch (chunk.tag) {
 #ifndef JEBP_NO_VP8L
     case JEBP__VP8L_TAG:
-        jebp__read_vp8l(ctx);
-        break;
+        return jebp__read_vp8l(image, reader, &chunk);
 #endif // JEBP_NO_VP8L
     default:
-        JEBP__ERROR(NOSUP_CODEC);
+        return JEBP_ERROR_NOSUP_CODEC;
     }
-    jebp__free_context(ctx);
-    return JEBP_OK;
 }
 
 jebp_error_t jebp_decode(jebp_image_t *image, size_t size, const void *data) {
     if (image == NULL || data == NULL) {
         return JEBP_ERROR_INVAL;
     }
-    jebp__context_t *ctx;
-    jebp_error_t err = jebp__memory_context(&ctx, image, size, data);
-    if (err != JEBP_OK) {
-        return err;
-    }
-    return jebp__read(ctx);
+    jebp__reader_t reader;
+    jebp__init_memory(&reader, size, data);
+    return jebp__read(image, &reader);
 }
 
 #ifndef JEBP_NO_STDIO
-static jebp_error_t jebp__file_context(jebp__context_t **ptr,
-                                       jebp_image_t *image, const char *path) {
-    jebp__context_t *ctx = jebp__alloc_context();
-    if (ctx == NULL) {
-        return JEBP_ERROR_NOMEM;
-    }
-    ctx->image = image;
-    ctx->file = fopen(path, "rb");
-    if (ctx->file == NULL) {
-        jebp__free_context(ctx);
-        return JEBP_ERROR_IO;
-    }
-    ctx->buffer = JEBP_ALLOC(JEBP__BUFFER_SIZE);
-    if (ctx->buffer == NULL) {
-        jebp__free_context(ctx);
-        return JEBP_ERROR_NOMEM;
-    }
-    *ptr = ctx;
-    return JEBP_OK;
-}
-
 jebp_error_t jebp_read_size(jebp_image_t *image, const char *path) {
+    jebp_error_t err;
     if (image == NULL || path == NULL) {
         return JEBP_ERROR_INVAL;
     }
-    jebp__context_t *ctx;
-    jebp_error_t err = jebp__file_context(&ctx, image, path);
-    if (err != JEBP_OK) {
+    jebp__reader_t reader;
+    if ((err = jebp__open_file(&reader, path)) != JEBP_OK) {
         return err;
     }
-    return jebp__read_size(ctx);
+    err = jebp__read_size(image, &reader);
+    jebp__close_file(&reader);
+    return err;
 }
 
 jebp_error_t jebp_read(jebp_image_t *image, const char *path) {
+    jebp_error_t err;
     if (image == NULL || path == NULL) {
         return JEBP_ERROR_INVAL;
     }
-    jebp__context_t *ctx;
-    jebp_error_t err = jebp__file_context(&ctx, image, path);
-    if (err != JEBP_OK) {
+    jebp__reader_t reader;
+    if ((err = jebp__open_file(&reader, path)) != JEBP_OK) {
         return err;
     }
-    return jebp__read(ctx);
+    err = jebp__read(image, &reader);
+    jebp__close_file(&reader);
+    return err;
 }
 #endif // JEBP_NO_STDIO
 
