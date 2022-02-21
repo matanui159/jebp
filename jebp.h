@@ -787,7 +787,7 @@ static void jepb__init_bit_reader(jebp__bit_reader_t *bits,
 // buffer/peek/skip should be used together to optimize bit-reading
 static jebp_error_t jebp__buffer_bits(jebp__bit_reader_t *bits, jebp_int size) {
     jebp_error_t err = JEBP_OK;
-    while (size < bits->nb_bits && bits->nb_bytes > 0) {
+    while (bits->nb_bits < size && bits->nb_bytes > 0) {
         bits->bits |= jebp__read_uint8(bits->reader, &err) << bits->nb_bits;
         bits->nb_bits += 8;
         bits->nb_bytes -= 1;
@@ -805,7 +805,7 @@ JEBP__INLINE jebp_error_t jebp__skip_bits(jebp__bit_reader_t *bits,
         return JEBP_ERROR_INVDATA;
     }
     bits->nb_bits -= size;
-    bits->nb_bytes >>= size;
+    bits->bits >>= size;
     return JEBP_OK;
 }
 
@@ -1044,7 +1044,7 @@ static jebp_error_t jebp__read_huffman(jebp__huffman_t **huffmans,
         }
 
     } else {
-        jebp_int meta_lengths[JEBP__NB_META_SYMBOLS];
+        jebp_byte meta_lengths[JEBP__NB_META_SYMBOLS];
         jebp_int nb_meta_lengths = jebp__read_bits(bits, 4, &err) + 4;
         for (jebp_int i = 0; i < nb_meta_lengths; i += 1) {
             meta_lengths[jebp__meta_length_order[i]] =
@@ -1094,7 +1094,7 @@ static jebp_error_t jebp__read_huffman(jebp__huffman_t **huffmans,
                 continue;
             }
             if (i + repeat >= nb_lengths) {
-                jebp__error(err, JEBP_ERROR_INVDATA);
+                jebp__error(&err, JEBP_ERROR_INVDATA);
                 break;
             }
             for (jebp_int j = 0; j < repeat; j += 1) {
@@ -1113,7 +1113,7 @@ static jebp_error_t jebp__read_huffman(jebp__huffman_t **huffmans,
 static jebp_error_t jebp__read_huffman_group(jebp__huffman_group_t *group,
                                              jebp__bit_reader_t *bits,
                                              jebp_int nb_main_symbols,
-                                             jebp_int *lengths) {
+                                             jebp_byte *lengths) {
     jebp_error_t err;
     if ((err = jebp__read_huffman(&group->main, bits, nb_main_symbols,
                                   lengths)) != JEBP_OK) {
@@ -1176,8 +1176,10 @@ static jebp_error_t jebp__read_colcache(jebp__colcache_t *colcache,
     return JEBP_OK;
 }
 
-static jebp_error_t jebp__free_colcache(jebp__colcache_t *colcache) {
-    JEBP_FREE(colcache->colors);
+static void jebp__free_colcache(jebp__colcache_t *colcache) {
+    if (colcache->bits > 0) {
+        JEBP_FREE(colcache->colors);
+    }
 }
 
 static void jebp__colcache_insert(jebp__colcache_t *colcache,
@@ -1222,7 +1224,7 @@ JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__bit_reader_t *bits,
     }
     jebp_int extrabits = symbol / 2 - 1;
     symbol = ((symbol % 2 + 2) << extrabits) + 1;
-    return symbol + jebp__read_bits(bits, extrabits, &err);
+    return symbol + jebp__read_bits(bits, extrabits, err);
 }
 
 static jebp_error_t jebp__read_vp8l_image(jebp_image_t *image,
@@ -1233,7 +1235,7 @@ static jebp_error_t jebp__read_vp8l_image(jebp_image_t *image,
     jebp_int nb_groups = 1;
     jebp__huffman_group_t *groups = &(jebp__huffman_group_t){0};
     if (huffman_image != NULL) {
-        for (jebp_int i = 0; i < jebp__image_pixels(huffman_image); i += 1) {
+        for (jebp_int i = 0; i < jebp__image_pixels((jebp_image_t *)huffman_image); i += 1) {
             jebp_color_t *pixel = &huffman_image->pixels[i];
             if (pixel->r != 0) {
                 // Currently only 256 huffman groups are supported
@@ -1322,7 +1324,7 @@ static jebp_error_t jebp__read_vp8l_image(jebp_image_t *image,
             *(pixel++) = colcache->colors[main - JEBP__NB_MAIN_SYMBOLS];
             block_x += 1;
         }
-        if (huffman_image != NULL && block_x > block_size) {
+        if (huffman_image != NULL && block_x >= block_size) {
             block += block_x >> huffman_image->block_bits;
             block_x &= block_size - 1;
             group = &groups[block->g];
@@ -1551,17 +1553,10 @@ typedef struct jebp__transform_t {
     jebp__subimage_t image;
 } jebp__transform_t;
 
-// <  0: no more transforms to read
-// >= 0: ok or error code
-static jebp_int jebp__read_transform(jebp__transform_t *transform,
+static jebp_error_t jebp__read_transform(jebp__transform_t *transform,
                                      jebp__bit_reader_t *bits,
                                      jebp_image_t *image) {
     jebp_error_t err = JEBP_OK;
-    if (!jebp__read_bits(bits, 1, &err)) {
-        // no more transforms to read
-        transform->type = JEBP__TRANSFORM_NONE;
-        return err == JEBP_OK ? -1 : err;
-    }
     transform->type = jebp__read_bits(bits, 2, &err);
     if (err != JEBP_OK) {
         return err;
@@ -1679,25 +1674,26 @@ static jebp_error_t jebp__read_vp8l_header(jebp_image_t *image,
 }
 
 static jebp_error_t jebp__read_vp8l_nohead(jebp_image_t *image,
-                                           jebp__reader_t *bits) {
+                                           jebp__bit_reader_t *bits) {
     jebp_error_t err = JEBP_OK;
-    jebp_int ret;
     jebp__transform_t transforms[4];
     jebp_int nb_transforms = 0;
-    // TODO: instead of -1 return code jank why not check the "has transform"
-    //       bit in the loop?
-    for (; nb_transforms < JEBP__NB_TRANSFORMS; nb_transforms += 1) {
-        if ((ret = jebp__read_transform(&transforms[nb_transforms], bits,
-                                        image)) != JEBP_OK) {
+    for (; nb_transforms <= JEBP__NB_TRANSFORMS; nb_transforms += 1) {
+        if (!jebp__read_bits(bits, 1, &err)) {
+            // no more transforms to read
             break;
         }
+        if (err != JEBP_OK || nb_transforms == JEBP__NB_TRANSFORMS) {
+            // too many transforms
+            jebp__error(&err, JEBP_ERROR_INVDATA);
+            goto free_transforms;
+        }
+        if ((err = jebp__read_transform(&transforms[nb_transforms], bits,
+                                        image)) != JEBP_OK) {
+            goto free_transforms;
+        }
     }
-    if (ret == 0 && jebp__read_bits(bits, 1, &err)) {
-        // there can only be 4 transforms at most
-        ret = JEBP_ERROR_INVDATA;
-    }
-    if (err != JEBP_OK || ret > JEBP_OK) {
-        jebp__error(&err, ret);
+    if (err != JEBP_OK) {
         goto free_transforms;
     }
 
