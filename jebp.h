@@ -638,18 +638,6 @@ static jebp__context_t *jebp__alloc_context(void) {
     return ctx;
 }
 
-static void jebp__free_context_groups(jebp__context_t *ctx) {
-    for (jebp_int i = 0; i < ctx->nb_groups; i += 1) {
-        jebp__huffman_group_t *group = &ctx->groups[i];
-        JEBP_FREE(group->main.tables->values);
-        JEBP_FREE(group->red.tables->values);
-        JEBP_FREE(group->blue.tables->values);
-        JEBP_FREE(group->alpha.tables->values);
-        JEBP_FREE(group->dist.tables->values);
-    }
-    JEBP_FREE(ctx->groups);
-}
-
 static void jebp__free_context(jebp__context_t *ctx) {
     (void)ctx;
 #ifndef JEBP_NO_STDIO
@@ -674,26 +662,6 @@ static void jebp__free_context(jebp__context_t *ctx) {
 /**
  * Common utilities
  */
-// JEBP__INLINE JEBP__NORETURN void jebp__error(jebp__context_t *ctx,
-//                                              jebp_error_t err, jebp_int line)
-//                                              {
-// #ifdef JEBP_LOG_ERRORS
-//     fprintf(stderr, "line %i: %s\n", line, jebp_error_string(err));
-// #else  // JEBP_LOG_ERRORS
-//     (void)line;
-// #endif // JEBP_LOG_ERRORS
-//     jebp_free_image(ctx->image);
-// #ifdef JEBP_ERROR
-//     jebp__free_context(ctx);
-//     JEBP_ERROR(err);
-// #else  // JEBP_ERROR
-//     ctx->error = err;
-//     longjmp(ctx->jump, 1);
-// #endif // JEBP_ERROR
-// }
-// #define JEBP__ERROR(err) jebp__error(ctx, JEBP_ERROR_##err, __LINE__)
-
-// #define JEBP__ERROR(a, b) ((a) == JEBP_OK ? (b) : (a))
 #define JEBP__MIN(a, b) ((a) < (b) ? (a) : (b))
 #define JEBP__MAX(a, b) ((a) > (b) ? (a) : (b))
 #define JEBP__ABS(a) ((a) < 0 ? -(a) : (a))
@@ -701,10 +669,6 @@ static void jebp__free_context(jebp__context_t *ctx) {
 #define JEBP__CEIL_SHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
 #define JEBP__CLAMP(x, min, max) JEBP__MIN(JEBP__MAX(x, min), max)
 #define JEBP__CLAMP_UBYTE(x) JEBP__CLAMP(x, 0, 255)
-#define JEBP__LOOP_IMAGE(image)                                                \
-    for (jebp_color_t *pixel = (image)->pixels,                                \
-                      *end = pixel + (image)->width * (image)->height;         \
-         pixel != end;)
 
 JEBP__INLINE jebp_error_t jebp__error(jebp_error_t *err, jebp_error_t error) {
     if (*err == JEBP_OK) {
@@ -713,16 +677,21 @@ JEBP__INLINE jebp_error_t jebp__error(jebp_error_t *err, jebp_error_t error) {
     return *err;
 }
 
+JEBP__INLINE jebp_int jebp__image_pixels(jebp_image_t *image) {
+    return image->width * image->height;
+}
+
 // Currently only used by VP8L
 // TODO: after VP8(no-L) support is added, make it an error to remove both
 //       VP8 and VP8L
 #ifndef JEBP_NO_VP8L
-static void jebp__alloc_image(jebp__context_t *ctx, jebp_image_t *image) {
+static jebp_error_t jebp__alloc_image(jebp_image_t *image) {
     image->pixels =
-        JEBP_ALLOC(image->width * image->height * sizeof(jebp_color_t));
+        JEBP_ALLOC(jebp__image_pixels(image) * sizeof(jebp_color_t));
     if (image->pixels == NULL) {
-        JEBP__ERROR(NOMEM);
+        return JEBP_ERROR_NOMEM;
     }
+    return JEBP_OK;
 }
 #endif // JEBP_NO_VP8L
 
@@ -1241,29 +1210,79 @@ static jebp_error_t jebp__read_huffman(jebp__huffman_t **huffmans,
     return jebp__alloc_huffman(huffmans, nb_lengths, lengths);
 }
 
-/**
- * VP8L image
- */
-#define JEBP__NB_VP8L_OFFSETS 120
-
-static const jebp_byte jebp__vp8l_offsets[JEBP__NB_VP8L_OFFSETS][2];
-
-static jebp_int jebp__read_colcache(jebp__context_t *ctx) {
-    if (!jebp__read_bits(ctx, 1)) {
-        // no color cache
-        return 0;
+static jebp_error_t jebp__read_huffman_group(jebp__huffman_group_t *group,
+                                             jebp__bit_reader_t *bits,
+                                             jebp_int nb_main_symbols,
+                                             jebp_int *lengths) {
+    jebp_error_t err;
+    if ((err = jebp__read_huffman(&group->main, bits, nb_main_symbols,
+                                  lengths)) != JEBP_OK) {
+        return err;
     }
-    jebp_int colcache_bits = jebp__read_bits(ctx, 4);
-    if (colcache_bits < 1 || colcache_bits > 11) {
-        JEBP__ERROR(INVDATA);
+    if ((err = jebp__read_huffman(&group->red, bits, JEBP__NB_COLOR_SYMBOLS,
+                                  lengths)) != JEBP_OK) {
+        return err;
     }
-    return colcache_bits;
+    if ((err = jebp__read_huffman(&group->blue, bits, JEBP__NB_COLOR_SYMBOLS,
+                                  lengths)) != JEBP_OK) {
+        return err;
+    }
+    if ((err = jebp__read_huffman(&group->alpha, bits, JEBP__NB_COLOR_SYMBOLS,
+                                  lengths)) != JEBP_OK) {
+        return err;
+    }
+    if ((err = jebp__read_huffman(&group->dist, bits, JEBP__NB_DIST_SYMBOLS,
+                                  lengths)) != JEBP_OK) {
+        return err;
+    }
+    return JEBP_OK;
 }
 
-JEBP__INLINE void jebp__colcache_insert(jebp__context_t *ctx,
-                                        jebp_color_t *color,
-                                        jebp_int colcache_bits) {
-    if (colcache_bits == 0) {
+static void jebp__free_huffman_group(jebp__huffman_group_t *group) {
+    JEBP_FREE(group->main);
+    JEBP_FREE(group->red);
+    JEBP_FREE(group->blue);
+    JEBP_FREE(group->alpha);
+    JEBP_FREE(group->dist);
+}
+
+/**
+ * Color cache
+ */
+typedef struct jebp__colcache_t {
+    jebp_int bits;
+    jebp_color_t *colors;
+} jebp__colcache_t;
+
+static jebp_error_t jebp__read_colcache(jebp__colcache_t *colcache,
+                                        jebp__bit_reader_t *bits) {
+    jebp_error_t err = JEBP_OK;
+    if (!jebp__read_bits(bits, 1, &err)) {
+        // no color cache
+        colcache->bits = 0;
+        return err;
+    }
+    colcache->bits = jebp__read_bits(bits, 4, &err);
+    if (err != JEBP_OK || colcache->bits < 1 || colcache->bits > 1) {
+        return jebp__error(&err, JEBP_ERROR_INVDATA);
+    }
+
+    size_t colcache_size = (1 << colcache->bits) * sizeof(jebp_color_t);
+    colcache->colors = JEBP_ALLOC(colcache_size);
+    if (colcache->colors == NULL) {
+        return JEBP_ERROR_NOMEM;
+    }
+    JEBP__CLEAR(colcache->colors, colcache_size);
+    return JEBP_OK;
+}
+
+static jebp_error_t jebp__free_colcache(jebp__colcache_t *colcache) {
+    JEBP_FREE(colcache->colors);
+}
+
+static void jebp__colcache_insert(jebp__colcache_t *colcache,
+                                  jebp_color_t *color) {
+    if (colcache->bits == 0) {
         return;
     }
 #if defined(JEBP__LITTLE_ENDIAN) && defined(JEBP__SWAP32)
@@ -1274,103 +1293,106 @@ JEBP__INLINE void jebp__colcache_insert(jebp__context_t *ctx,
     jebp_uint hash = ((jebp_uint)color->a << 24) | ((jebp_uint)color->r << 16) |
                      ((jebp_uint)color->g << 8) | (jebp_uint)color->b;
 #endif
-    hash = (0x1e35a7bd * hash) >> (32 - colcache_bits);
-    ctx->colcache[hash] = *color;
+    hash = (0x1e35a7bd * hash) >> (32 - colcache->bits);
+    colcache->colors[hash] = *color;
 }
 
-JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__context_t *ctx,
-                                                jebp_int symbol) {
+/**
+ * VP8L image
+ */
+#define JEBP__NB_VP8L_OFFSETS 120
+
+static const jebp_byte jebp__vp8l_offsets[JEBP__NB_VP8L_OFFSETS][2];
+
+JEBP__INLINE jebp_int jebp__read_vp8l_extrabits(jebp__bit_reader_t *bits,
+                                                jebp_int symbol,
+                                                jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
     if (symbol < 4) {
         return symbol + 1;
     }
     jebp_int extrabits = symbol / 2 - 1;
     symbol = ((symbol % 2 + 2) << extrabits) + 1;
-    return symbol + jebp__read_bits(ctx, extrabits);
+    return symbol + jebp__read_bits(bits, extrabits, &err);
 }
 
-JEBP__INLINE jebp_color_t *jebp__index_subimage(jebp_image_t *image,
-                                                jebp_color_t *pixel,
-                                                jebp__subimage_t *subimage) {
-    jebp_int i = (jebp_int)(pixel - image->pixels);
-    jebp_int x = i % image->width;
-    jebp_int y = i / image->width;
-    jebp_int j = (y >> subimage->block_bits) * subimage->width +
-                 (x >> subimage->block_bits);
-    return &subimage->pixels[j];
-}
-
-static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image,
-                                  jebp_int colcache_bits,
-                                  jebp__subimage_t *huffman_image) {
-    jebp_int nb_colcache_symbols = colcache_bits == 0 ? 0 : 1 << colcache_bits;
-    size_t colcache_size = nb_colcache_symbols * sizeof(jebp_color_t);
-    if (colcache_bits > ctx->colcache_bits) {
-        JEBP_FREE(ctx->colcache);
-        ctx->colcache = JEBP_ALLOC(colcache_size);
-        if (ctx->colcache == NULL) {
-            JEBP__ERROR(NOMEM);
-        }
-        ctx->colcache_bits = colcache_bits;
-    }
-    if (colcache_bits > 0) {
-        JEBP__CLEAR(ctx->colcache, colcache_size);
-    }
-
+static jebp_error_t jebp__read_vp8l_image(jebp_image_t *image,
+                                          jebp__bit_reader_t *bits,
+                                          jebp__colcache_t *colcache,
+                                          jebp__subimage_t *huffman_image) {
+    jebp_error_t err = JEBP_OK;
     jebp_int nb_groups = 1;
+    jebp__huffman_group_t *groups = &(jebp__huffman_group_t){0};
     if (huffman_image != NULL) {
-        JEBP__LOOP_IMAGE(huffman_image) {
+        for (jebp_int i = 0; i < jebp__image_pixels(huffman_image); i += 1) {
+            jebp_color_t *pixel = &huffman_image->pixels[i];
             if (pixel->r != 0) {
                 // Currently only 256 huffman groups are supported
-                JEBP__ERROR(NOSUP);
+                return JEBP_ERROR_NOSUP;
             }
-            if (pixel->g >= nb_groups) {
-                nb_groups = pixel->g + 1;
+            nb_groups = JEBP__MAX(nb_groups, pixel->g + 1);
+        }
+        if (nb_groups > 1) {
+            groups = JEBP_ALLOC(nb_groups * sizeof(jebp__huffman_group_t));
+            if (groups == NULL) {
+                return JEBP_ERROR_NOMEM;
             }
-            pixel += 1;
         }
-    }
-    if (nb_groups > ctx->nb_groups) {
-        jebp__free_context_groups(ctx);
-        size_t groups_size = nb_groups * sizeof(jebp__huffman_group_t);
-        ctx->groups = JEBP_ALLOC(groups_size);
-        if (ctx->groups == NULL) {
-            ctx->nb_groups = 0;
-            JEBP__ERROR(NOMEM);
-        }
-        JEBP__CLEAR(ctx->groups, groups_size);
-        ctx->nb_groups = nb_groups;
-    }
-    for (jebp_int i = 0; i < nb_groups; i += 1) {
-        jebp__huffman_group_t *group = &ctx->groups[i];
-        jebp__read_huffman(ctx, &group->main,
-                           JEBP__NB_MAIN_SYMBOLS + nb_colcache_symbols);
-        jebp__read_huffman(ctx, &group->red, JEBP__NB_COLOR_SYMBOLS);
-        jebp__read_huffman(ctx, &group->blue, JEBP__NB_COLOR_SYMBOLS);
-        jebp__read_huffman(ctx, &group->alpha, JEBP__NB_COLOR_SYMBOLS);
-        jebp__read_huffman(ctx, &group->dist, JEBP__NB_DIST_SYMBOLS);
     }
 
-    jebp__alloc_image(ctx, image);
-    JEBP__LOOP_IMAGE(image) {
-        jebp__huffman_group_t *group = ctx->groups;
-        if (huffman_image != NULL) {
-            jebp_int index =
-                jebp__index_subimage(image, pixel, huffman_image)->g;
-            group = &ctx->groups[index];
+    jebp_int nb_main_symbols = JEBP__NB_MAIN_SYMBOLS;
+    if (colcache->bits > 0) {
+        nb_main_symbols += 1 << colcache->bits;
+    }
+    jebp_byte *lengths = JEBP_ALLOC(nb_main_symbols);
+    if (lengths == NULL) {
+        err = JEBP_ERROR_NOMEM;
+        goto free_groups;
+    }
+    jebp_int nb_read_groups = 0;
+    for (; nb_read_groups < nb_groups; nb_read_groups += 1) {
+        if ((err = jebp__read_huffman_group(&groups[nb_read_groups], bits,
+                                            nb_main_symbols, lengths)) !=
+            JEBP_OK) {
+            break;
         }
-        jebp_int main = jebp__read_symbol(ctx, &group->main);
+    }
+    JEBP_FREE(lengths);
+    if (err != JEBP_OK) {
+        goto free_read_groups;
+    }
+    if ((err = jebp__alloc_image(image)) != JEBP_OK) {
+        goto free_read_groups;
+    }
+
+    jebp_color_t *pixel = image->pixels;
+    jebp_color_t *end = pixel + jebp__image_pixels(image);
+    jebp__huffman_group_t *group = groups;
+    jebp_color_t *block;
+    jebp_int block_size;
+    jebp_int block_x = 0;
+    if (huffman_image != NULL) {
+        block = huffman_image->pixels;
+        block_size = 1 << huffman_image->block_bits;
+        group = &groups[block->g];
+    }
+    while (pixel != end) {
+        jebp_int main = jebp__read_symbol(group->main, bits, &err);
         if (main < JEBP__NB_COLOR_SYMBOLS) {
             pixel->g = main;
-            pixel->r = jebp__read_symbol(ctx, &group->red);
-            pixel->b = jebp__read_symbol(ctx, &group->blue);
-            pixel->a = jebp__read_symbol(ctx, &group->alpha);
-            jebp__colcache_insert(ctx, pixel, colcache_bits);
+            pixel->r = jebp__read_symbol(group->red, bits, &err);
+            pixel->b = jebp__read_symbol(group->blue, bits, &err);
+            pixel->a = jebp__read_symbol(group->alpha, bits, &err);
+            jebp__colcache_insert(colcache, pixel);
             pixel += 1;
+            block_x += 1;
         } else if (main < JEBP__NB_MAIN_SYMBOLS) {
-            jebp_int length =
-                jebp__read_vp8l_extrabits(ctx, main - JEBP__NB_COLOR_SYMBOLS);
-            jebp_int dist = jebp__read_symbol(ctx, &group->dist);
-            dist = jebp__read_vp8l_extrabits(ctx, dist);
+            jebp_int length = jebp__read_vp8l_extrabits(
+                bits, main - JEBP__NB_COLOR_SYMBOLS, &err);
+            jebp_int dist = jebp__read_symbol(group->dist, bits, &err);
+            dist = jebp__read_vp8l_extrabits(bits, dist, &err);
             if (dist > JEBP__NB_VP8L_OFFSETS) {
                 dist -= JEBP__NB_VP8L_OFFSETS;
             } else {
@@ -1380,25 +1402,58 @@ static void jebp__read_vp8l_image(jebp__context_t *ctx, jebp_image_t *image,
             }
             jebp_color_t *repeat = pixel - dist;
             jebp_color_t *repeat_end = repeat + length;
-            if (repeat < image->pixels || repeat_end >= end) {
-                JEBP__ERROR(INVDATA);
+            if (repeat < image->pixels || pixel + length > end) {
+                jebp__error(&err, JEBP_ERROR_INVDATA);
+                break;
             }
-            while (pixel != end && repeat != repeat_end) {
-                jebp__colcache_insert(ctx, repeat, colcache_bits);
+            while (repeat != repeat_end) {
+                jebp__colcache_insert(colcache, repeat);
                 *(pixel++) = *(repeat++);
             }
+            block_x += length;
         } else {
-            *(pixel++) = ctx->colcache[main - JEBP__NB_MAIN_SYMBOLS];
+            *(pixel++) = colcache->colors[main - JEBP__NB_MAIN_SYMBOLS];
+            block_x += 1;
+        }
+        if (huffman_image != NULL && block_x > block_size) {
+            block += block_x >> huffman_image->block_bits;
+            block_x &= block_size - 1;
+            group = &groups[block->g];
         }
     }
+
+    if (err != JEBP_OK) {
+        jebp_free_image(image);
+    }
+free_read_groups:
+    for (nb_read_groups -= 1; nb_read_groups >= 0; nb_read_groups -= 1) {
+        jebp__free_huffman_group(&groups[nb_read_groups]);
+    }
+free_groups:
+    if (nb_groups > 1) {
+        JEBP_FREE(groups);
+    }
+    return err;
 }
 
-static void jebp__read_subimage(jebp__context_t *ctx, jebp__subimage_t *image) {
-    image->block_bits = jebp__read_bits(ctx, 3) + 2;
-    image->width = JEBP__CEIL_SHIFT(ctx->image->width, image->block_bits);
-    image->height = JEBP__CEIL_SHIFT(ctx->image->height, image->block_bits);
-    jebp_int colcache_bits = jebp__read_colcache(ctx);
-    jebp__read_vp8l_image(ctx, (jebp_image_t *)image, colcache_bits, NULL);
+static jebp_error_t jebp__read_subimage(jebp__subimage_t *subimage,
+                                        jebp__bit_reader_t *bits,
+                                        jebp_image_t *image) {
+    jebp_error_t err = JEBP_OK;
+    subimage->block_bits = jebp__read_bits(bits, 3, &err) + 2;
+    subimage->width = JEBP__CEIL_SHIFT(image->width, subimage->block_bits);
+    subimage->height = JEBP__CEIL_SHIFT(image->height, subimage->block_bits);
+    if (err != JEBP_OK) {
+        return err;
+    }
+    jebp__colcache_t colcache;
+    if ((err = jebp__read_colcache(&colcache, bits)) != JEBP_OK) {
+        return err;
+    }
+    err =
+        jebp__read_vp8l_image((jebp_image_t *)subimage, bits, &colcache, NULL);
+    jebp__free_colcache(&colcache);
+    return err;
 }
 
 /**
