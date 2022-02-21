@@ -1553,7 +1553,9 @@ typedef struct jebp__transform_t {
 
 // <  0: no more transforms to read
 // >= 0: ok or error code
-static jebp_int jebp__read_transform(jebp__transform_t *transform, jebp__bit_reader_t *bits, jebp_image_t *image) {
+static jebp_int jebp__read_transform(jebp__transform_t *transform,
+                                     jebp__bit_reader_t *bits,
+                                     jebp_image_t *image) {
     jebp_error_t err = JEBP_OK;
     if (!jebp__read_bits(bits, 1, &err)) {
         // no more transforms to read
@@ -1654,7 +1656,10 @@ static void jebp__free_transform(jebp__transform_t *transform) {
 #define JEBP__VP8L_TAG 0x4c385056
 #define JEBP__VP8L_MAGIC 0x2f
 
-static jebp_error_t jebp__read_vp8l_header(jebp_image_t *image, jebp__reader_t *reader, jebp__bit_reader_t *bits, jebp__chunk_t *chunk) {
+static jebp_error_t jebp__read_vp8l_header(jebp_image_t *image,
+                                           jebp__reader_t *reader,
+                                           jebp__bit_reader_t *bits,
+                                           jebp__chunk_t *chunk) {
     jebp_error_t err = JEBP_OK;
     if (chunk->size < 5) {
         return JEBP_ERROR_INVDATA_HEADER;
@@ -1673,13 +1678,17 @@ static jebp_error_t jebp__read_vp8l_header(jebp_image_t *image, jebp__reader_t *
     return err;
 }
 
-static jebp_error_t jebp__read_vp8l_nohead(jebp_image_t *image, jebp__reader_t *bits) {
+static jebp_error_t jebp__read_vp8l_nohead(jebp_image_t *image,
+                                           jebp__reader_t *bits) {
     jebp_error_t err = JEBP_OK;
     jebp_int ret;
     jebp__transform_t transforms[4];
     jebp_int nb_transforms = 0;
+    // TODO: instead of -1 return code jank why not check the "has transform"
+    //       bit in the loop?
     for (; nb_transforms < JEBP__NB_TRANSFORMS; nb_transforms += 1) {
-        if ((ret = jebp__read_transform(&transforms[nb_transforms], bits, image)) != JEBP_OK) {
+        if ((ret = jebp__read_transform(&transforms[nb_transforms], bits,
+                                        image)) != JEBP_OK) {
             break;
         }
     }
@@ -1705,7 +1714,8 @@ static jebp_error_t jebp__read_vp8l_nohead(jebp_image_t *image, jebp__reader_t *
         goto free_colcache;
     }
     if (huffman_image != NULL) {
-        if ((err = jebp__read_subimage(huffman_image, bits, image)) != JEBP_OK) {
+        if ((err = jebp__read_subimage(huffman_image, bits, image)) !=
+            JEBP_OK) {
             goto free_colcache;
         }
     }
@@ -1724,10 +1734,12 @@ free_transforms:
     return err;
 }
 
-static jebp_error_t jebp__read_vp8l(jebp_image_t *image, jebp__reader_t *reader, jebp__chunk_t *chunk) {
+static jebp_error_t jebp__read_vp8l(jebp_image_t *image, jebp__reader_t *reader,
+                                    jebp__chunk_t *chunk) {
     jebp_error_t err;
     jebp__bit_reader_t bits;
-    if ((err = jebp__read_vp8l_header(image, reader, &bits, chunk)) != JEBP_OK) {
+    if ((err = jebp__read_vp8l_header(image, reader, &bits, chunk)) !=
+        JEBP_OK) {
         return err;
     }
     if ((err = jebp__read_vp8l_nohead(image, &bits)) != JEBP_OK) {
@@ -1756,7 +1768,8 @@ void jebp_free_image(jebp_image_t *image) {
     }
 }
 
-static jebp_error_t jebp__read_size(jebp_image_t *image, jebp__reader_t *reader) {
+static jebp_error_t jebp__read_size(jebp_image_t *image,
+                                    jebp__reader_t *reader) {
     jebp_error_t err;
     jebp__riff_reader_t riff;
     JEBP__CLEAR(image, sizeof(jebp_image_t));
