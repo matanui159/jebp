@@ -832,7 +832,6 @@ static jebp_uint jebp__read_bits(jebp__bit_reader_t *bits, jebp_int size,
 #define JEBP__MAX_SECONDARY_LENGTH                                             \
     (JEBP__MAX_HUFFMAN_LENGTH - JEBP__MAX_PRIMARY_LENGTH)
 #define JEBP__NB_PRIMARY_HUFFMANS (1 << JEBP__MAX_PRIMARY_LENGTH)
-#define JEBP__SECONDARY_MASK ((1 << JEBP__MAX_SECONDARY_LENGTH) - 1)
 #define JEBP__NO_HUFFMAN_SYMBOL 0xffff
 
 #define JEBP__NB_META_SYMBOLS 19
@@ -869,10 +868,24 @@ typedef struct jebp__huffman_group_t {
 
 static const jebp_byte jebp__meta_length_order[JEBP__NB_META_SYMBOLS];
 
+// Reverse increment
+JEBP__INLINE jebp_error_t jebp__increment_code(jebp_int *code,
+                                               jebp_int length) {
+    jebp_int inc = 1 << (length - 1);
+    for (; *code & inc; inc >>= 1)
+        ;
+    if (inc == 0) {
+        return JEBP_ERROR_INVDATA;
+    }
+    *code = (*code & (inc - 1)) + inc;
+    return JEBP_OK;
+}
+
 // This function is a bit confusing so I have attempted to document it well
 static jebp_error_t jebp__alloc_huffman(jebp__huffman_t **huffmans,
                                         jebp_int nb_lengths,
                                         const jebp_byte *lengths) {
+    jebp_error_t err = JEBP_OK;
     // Stack allocate the primary table and set it all to invalid values
     jebp__huffman_t primary[JEBP__NB_PRIMARY_HUFFMANS];
     for (jebp_int i = 0; i < JEBP__NB_PRIMARY_HUFFMANS; i += 1) {
@@ -889,34 +902,34 @@ static jebp_error_t jebp__alloc_huffman(jebp__huffman_t **huffmans,
             if (lengths[i] != len) {
                 continue;
             }
-            // If we overflow, the 8th bit will be set
-            if (code >> JEBP__MAX_PRIMARY_LENGTH) {
-                return JEBP_ERROR_INVDATA;
+            if (err != JEBP_OK) {
+                // Fail now if the last increment overflowed
+                return err;
             }
-            jebp_int end = code + (1 << (JEBP__MAX_PRIMARY_LENGTH - len));
-            for (; code < end; code += 1) {
-                primary[code].length = len;
-                primary[code].symbol = i;
+            for (jebp_int c = code; c < JEBP__NB_PRIMARY_HUFFMANS;
+                 c += 1 << len) {
+                primary[c].length = len;
+                primary[c].symbol = i;
             }
+            err = jebp__increment_code(&code, len);
             symbol = i;
             nb_symbols += 1;
         }
     }
 
     // Fill in the secondary table lengths in the primary table
-    code <<= JEBP__MAX_SECONDARY_LENGTH;
     jebp_int secondary_code = code;
-    for (; len <= JEBP__MAX_HUFFMAN_LENGTH; len += 1, code <<= 1) {
+    for (; len <= JEBP__MAX_HUFFMAN_LENGTH; len += 1) {
         for (jebp_int i = 0; i < nb_lengths; i += 1) {
             if (lengths[i] != len) {
                 continue;
             }
-            if (code >> JEBP__MAX_HUFFMAN_LENGTH) {
-                return JEBP_ERROR_INVDATA;
+            if (err != JEBP_OK) {
+                return err;
             }
-            jebp_int prefix = code >> JEBP__MAX_SECONDARY_LENGTH;
+            jebp_int prefix = code & (JEBP__NB_PRIMARY_HUFFMANS - 1);
             primary[prefix].length = len;
-            code += 1 << (JEBP__MAX_HUFFMAN_LENGTH - len);
+            err = jebp__increment_code(&code, len);
             symbol = i;
             nb_symbols += 1;
         }
@@ -953,34 +966,25 @@ static jebp_error_t jebp__alloc_huffman(jebp__huffman_t **huffmans,
         return JEBP_OK;
     }
     for (jebp_int i = JEBP__NB_PRIMARY_HUFFMANS; i < nb_huffmans; i += 1) {
-        (*huffmans[i]).symbol = JEBP__NO_HUFFMAN_SYMBOL;
+        (*huffmans)[i].symbol = JEBP__NO_HUFFMAN_SYMBOL;
     }
 
     // Fill in the secondary tables
-    len = JEBP__NB_PRIMARY_HUFFMANS + 1;
+    len = JEBP__MAX_PRIMARY_LENGTH + 1;
     code = secondary_code;
     for (; len <= JEBP__MAX_HUFFMAN_LENGTH; len += 1) {
         for (jebp_int i = 0; i < nb_lengths; i += 1) {
             if (lengths[i] != len) {
                 continue;
             }
-            // The index used for the primary table
-            jebp_int prefix = code >> JEBP__MAX_SECONDARY_LENGTH;
-            // The secondary table
+            jebp_int prefix = code & (JEBP__NB_PRIMARY_HUFFMANS - 1);
+            jebp_int nb_secondary_huffmans = 1 << primary[prefix].length;
             jebp__huffman_t *secondary = *huffmans + primary[prefix].symbol;
-            // The no. of bits at the end of the code that are unused due to
-            // the max secondary table length
-            jebp_int zero_length =
-                JEBP__MAX_HUFFMAN_LENGTH - primary[prefix].length;
-            // The first index used for the secondary table
-            jebp_int suffix = (code & JEBP__SECONDARY_MASK) >> zero_length;
-
-            jebp_int end = code + (1 << (JEBP__MAX_HUFFMAN_LENGTH - len));
-            jebp_int inc = 1 << zero_length;
-            for (; code != end; code += inc, suffix += 1) {
-                secondary[suffix].length = len;
-                secondary[suffix].symbol = i;
+            for (jebp_int c = code; c < nb_secondary_huffmans; c += 1 << len) {
+                secondary[c >> JEBP__MAX_PRIMARY_LENGTH].length = len;
+                secondary[c >> JEBP__MAX_PRIMARY_LENGTH].symbol = i;
             }
+            jebp__increment_code(&code, len);
         }
     }
     return JEBP_OK;
@@ -995,25 +999,29 @@ static jebp_int jebp__read_symbol(jebp__huffman_t *huffmans,
         return *err;
     }
     jebp_int code = jepb__peek_bits(bits, JEBP__MAX_PRIMARY_LENGTH);
-    if (*err != JEBP_OK || huffmans[code].symbol == JEBP__NO_HUFFMAN_SYMBOL) {
-        jebp__error(err, JEBP_ERROR_INVDATA);
+    if (huffmans[code].symbol == JEBP__NO_HUFFMAN_SYMBOL) {
+        *err = JEBP_ERROR_INVDATA;
         return 0;
     }
     jebp_int length = huffmans[code].length;
-    jebp_int suffix_length = length - JEBP__MAX_PRIMARY_LENGTH;
-    if (suffix_length <= 0) {
-        jebp__skip_bits(bits, length);
+    jebp_int skip = JEBP__MIN(length, JEBP__MAX_PRIMARY_LENGTH);
+    if ((*err = jebp__skip_bits(bits, skip)) != JEBP_OK) {
+        return 0;
+    }
+    if (skip == length) {
         return huffmans[code].symbol;
     }
 
     huffmans += huffmans[code].symbol;
-    jebp__skip_bits(bits, JEBP__MAX_PRIMARY_LENGTH);
-    code = jepb__peek_bits(bits, suffix_length);
-    if (*err != JEBP_OK || huffmans[code].symbol == JEBP__NO_HUFFMAN_SYMBOL) {
-        jebp__error(err, JEBP_ERROR_INVDATA);
+    code = jepb__peek_bits(bits, length - skip);
+    if (huffmans[code].symbol == JEBP__NO_HUFFMAN_SYMBOL) {
+        *err = JEBP_ERROR_INVDATA;
         return 0;
     }
-    jebp__skip_bits(bits, huffmans[code].length - JEBP__MAX_PRIMARY_LENGTH);
+    if ((*err = jebp__skip_bits(bits, huffmans[code].length - skip)) !=
+        JEBP_OK) {
+        return 0;
+    }
     return huffmans[code].symbol;
 }
 
@@ -1044,7 +1052,7 @@ static jebp_error_t jebp__read_huffman(jebp__huffman_t **huffmans,
         }
 
     } else {
-        jebp_byte meta_lengths[JEBP__NB_META_SYMBOLS];
+        jebp_byte meta_lengths[JEBP__NB_META_SYMBOLS] = {0};
         jebp_int nb_meta_lengths = jebp__read_bits(bits, 4, &err) + 4;
         for (jebp_int i = 0; i < nb_meta_lengths; i += 1) {
             meta_lengths[jebp__meta_length_order[i]] =
@@ -1093,7 +1101,7 @@ static jebp_error_t jebp__read_huffman(jebp__huffman_t **huffmans,
                 lengths[i++] = symbol;
                 continue;
             }
-            if (i + repeat >= nb_lengths) {
+            if (i + repeat > nb_lengths) {
                 jebp__error(&err, JEBP_ERROR_INVDATA);
                 break;
             }
@@ -1235,7 +1243,8 @@ static jebp_error_t jebp__read_vp8l_image(jebp_image_t *image,
     jebp_int nb_groups = 1;
     jebp__huffman_group_t *groups = &(jebp__huffman_group_t){0};
     if (huffman_image != NULL) {
-        for (jebp_int i = 0; i < jebp__image_pixels((jebp_image_t *)huffman_image); i += 1) {
+        for (jebp_int i = 0;
+             i < jebp__image_pixels((jebp_image_t *)huffman_image); i += 1) {
             jebp_color_t *pixel = &huffman_image->pixels[i];
             if (pixel->r != 0) {
                 // Currently only 256 huffman groups are supported
@@ -1554,8 +1563,8 @@ typedef struct jebp__transform_t {
 } jebp__transform_t;
 
 static jebp_error_t jebp__read_transform(jebp__transform_t *transform,
-                                     jebp__bit_reader_t *bits,
-                                     jebp_image_t *image) {
+                                         jebp__bit_reader_t *bits,
+                                         jebp_image_t *image) {
     jebp_error_t err = JEBP_OK;
     transform->type = jebp__read_bits(bits, 2, &err);
     if (err != JEBP_OK) {
