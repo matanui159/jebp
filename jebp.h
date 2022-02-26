@@ -1745,7 +1745,6 @@ static jebp_error_t jebp__apply_transform(jebp__transform_t *transform,
         return jebp__apply_predict_transform(image, &transform->image);
     case JEBP__TRANSFORM_COLOR:
         return jebp__apply_color_transform(image, &transform->image);
-        break;
     case JEBP__TRANSFORM_GREEN:
         return jebp__apply_green_transform(image);
     default:
