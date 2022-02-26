@@ -1190,7 +1190,7 @@ static jebp_error_t jebp__read_colcache(jebp__colcache_t *colcache,
         return jebp__error(&err, JEBP_ERROR_INVDATA);
     }
 
-    size_t colcache_size = (1 << colcache->bits) * sizeof(jebp_color_t);
+    size_t colcache_size = ((size_t)1 << colcache->bits) * sizeof(jebp_color_t);
     colcache->colors = JEBP_ALLOC(colcache_size);
     if (colcache->colors == NULL) {
         return JEBP_ERROR_NOMEM;
@@ -1304,8 +1304,8 @@ static jebp_error_t jebp__read_vp8l_image(jebp_image_t *image,
     jebp__huffman_group_t *group = groups;
     jebp_int huffman_x = 0;
     jebp_int huffman_y = 0;
-    jebp_color_t *huffman_pixel;
-    jebp_color_t *huffman_row;
+    jebp_color_t *huffman_pixel = NULL;
+    jebp_color_t *huffman_row = NULL;
     if (huffman_image != NULL) {
         huffman_pixel = huffman_image->pixels;
         huffman_row = huffman_pixel;
@@ -1676,7 +1676,7 @@ JEBP__INLINE jebp_error_t jebp__apply_predict_transform(
         jebp_color_t *row_end = pixel + image->width;
         // Use top prediction for the left column
         jebp__vp8l_pred_top(pixel++, top++);
-        jebp_int size = JEBP__MIN(row_end - pixel, block_size - 1);
+        jebp_int size = JEBP__MIN((jebp_int)(row_end - pixel), block_size - 1);
         while (pixel != row_end) {
             if (predict_pixel->g >= JEBP__NB_VP8L_PRED_TYPES) {
                 return JEBP_ERROR_INVDATA;
@@ -1685,7 +1685,7 @@ JEBP__INLINE jebp_error_t jebp__apply_predict_transform(
             pixel += size;
             top += size;
             predict_pixel += 1;
-            size = JEBP__MIN(row_end - pixel, block_size);
+            size = JEBP__MIN((jebp_int)(row_end - pixel), block_size);
         }
         block_y += 1;
         if (block_y < block_size) {
@@ -1714,7 +1714,7 @@ JEBP__INLINE jebp_error_t jebp__apply_color_transform(
     JEBP__LOOP_IMAGE(image) {
         jebp_color_t *row_end = pixel + image->width;
         while (pixel != row_end) {
-            jebp_int size = JEBP__MIN(row_end - pixel, block_size);
+            jebp_int size = JEBP__MIN((jebp_int)(row_end - pixel), block_size);
             jebp__apply_color_row(pixel, pixel + size, color_pixel);
             pixel += size;
             color_pixel += 1;
