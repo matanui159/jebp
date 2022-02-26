@@ -564,7 +564,8 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 // TODO: Maybe we should instead have a logging flag and add custom logs with
 //       more information to each error (and maybe other stuff like allocations)
 #ifdef JEBP_LOG_ERRORS
-#define JEBP__LOG(err) (printf("line %i: %s\n", __LINE__, jebp_error_string(err)), err)
+#define JEBP__LOG(err)                                                         \
+    (printf("line %i: %s\n", __LINE__, jebp_error_string(err)), err)
 #define JEBP_ERROR_INVAL JEBP__LOG(1)
 #define JEBP_ERROR_INVDATA JEBP__LOG(2)
 #define JEBP_ERROR_INVDATA_HEADER JEBP__LOG(3)
@@ -584,8 +585,10 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #define JEBP__CLAMP(x, min, max) JEBP__MIN(JEBP__MAX(x, min), max)
 #define JEBP__CLAMP_UBYTE(x) JEBP__CLAMP(x, 0, 255)
 #define JEBP__CLEAR(ptr, size) memset(ptr, 0, size)
-#define JEBP__LOOP_IMAGE(image) \
-    for (jebp_color_t *pixel = (image)->pixels, *end = pixel + (image)->width * (image)->height; pixel != end;)
+#define JEBP__LOOP_IMAGE(image)                                                \
+    for (jebp_color_t *pixel = (image)->pixels,                                \
+                      *end = pixel + (image)->width * (image)->height;         \
+         pixel != end;)
 
 JEBP__INLINE jebp_error_t jebp__error(jebp_error_t *err, jebp_error_t error) {
     if (*err == JEBP_OK) {
@@ -882,8 +885,7 @@ typedef struct jebp__huffman_group_t {
 static const jebp_byte jebp__meta_length_order[JEBP__NB_META_SYMBOLS];
 
 // Reverse increment, returns truthy on overflow
-JEBP__INLINE jebp_int jebp__increment_code(jebp_int *code,
-                                               jebp_int length) {
+JEBP__INLINE jebp_int jebp__increment_code(jebp_int *code, jebp_int length) {
     jebp_int inc = 1 << (length - 1);
     for (; *code & inc; inc >>= 1)
         ;
@@ -1408,7 +1410,8 @@ static jebp_error_t jebp__read_subimage(jebp__subimage_t *subimage,
  */
 #define JEBP__NB_VP8L_PRED_TYPES 14
 
-typedef void (*jebp__vp8l_pred_t)(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top);
+typedef void (*jebp__vp8l_pred_t)(jebp_color_t *pixel, jebp_color_t *end,
+                                  jebp_color_t *top);
 
 typedef struct jebp__short_color_t {
     jebp_short r;
@@ -1421,7 +1424,8 @@ JEBP__INLINE void jebp__vp8l_pred_black(jebp_color_t *pixel) {
     pixel->a += 0xff;
 }
 
-static void jebp__vp8l_pred0(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred0(jebp_color_t *pixel, jebp_color_t *end,
+                             jebp_color_t *top) {
     (void)top;
     for (; pixel != end; pixel += 1) {
         jebp__vp8l_pred_black(pixel);
@@ -1435,7 +1439,8 @@ JEBP__INLINE void jebp__vp8l_pred_left(jebp_color_t *pixel) {
     pixel->a += pixel[-1].a;
 }
 
-static void jebp__vp8l_pred1(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred1(jebp_color_t *pixel, jebp_color_t *end,
+                             jebp_color_t *top) {
     (void)top;
     for (; pixel != end; pixel += 1) {
         jebp__vp8l_pred_left(pixel);
@@ -1449,13 +1454,15 @@ JEBP__INLINE void jebp__vp8l_pred_top(jebp_color_t *pixel, jebp_color_t *top) {
     pixel->a += top->a;
 }
 
-static void jebp__vp8l_pred2(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred2(jebp_color_t *pixel, jebp_color_t *end,
+                             jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
         jebp__vp8l_pred_top(pixel, top);
     }
 }
 
-static void jebp__vp8l_pred3(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred3(jebp_color_t *pixel, jebp_color_t *end,
+                             jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
         pixel->r += top[1].r;
         pixel->g += top[1].g;
@@ -1464,7 +1471,8 @@ static void jebp__vp8l_pred3(jebp_color_t *pixel, jebp_color_t *end, jebp_color_
     }
 }
 
-static void jebp__vp8l_pred4(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred4(jebp_color_t *pixel, jebp_color_t *end,
+                             jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
         pixel->r += top[-1].r;
         pixel->g += top[-1].g;
@@ -1473,7 +1481,8 @@ static void jebp__vp8l_pred4(jebp_color_t *pixel, jebp_color_t *end, jebp_color_
     }
 }
 
-static void jebp__vp8l_pred5(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred5(jebp_color_t *pixel, jebp_color_t *end,
+                             jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
         pixel->r += JEBP__AVG(JEBP__AVG(pixel[-1].r, top[1].r), top->r);
         pixel->g += JEBP__AVG(JEBP__AVG(pixel[-1].g, top[1].g), top->g);
@@ -1482,7 +1491,8 @@ static void jebp__vp8l_pred5(jebp_color_t *pixel, jebp_color_t *end, jebp_color_
     }
 }
 
-static void jebp__vp8l_pred6(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred6(jebp_color_t *pixel, jebp_color_t *end,
+                             jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
         pixel->r += JEBP__AVG(pixel[-1].r, top[-1].r);
         pixel->g += JEBP__AVG(pixel[-1].g, top[-1].g);
@@ -1491,7 +1501,8 @@ static void jebp__vp8l_pred6(jebp_color_t *pixel, jebp_color_t *end, jebp_color_
     }
 }
 
-static void jebp__vp8l_pred7(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred7(jebp_color_t *pixel, jebp_color_t *end,
+                             jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
         pixel->r += JEBP__AVG(pixel[-1].r, top->r);
         pixel->g += JEBP__AVG(pixel[-1].g, top->g);
@@ -1500,7 +1511,8 @@ static void jebp__vp8l_pred7(jebp_color_t *pixel, jebp_color_t *end, jebp_color_
     }
 }
 
-static void jebp__vp8l_pred8(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred8(jebp_color_t *pixel, jebp_color_t *end,
+                             jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
         pixel->r += JEBP__AVG(top[-1].r, top->r);
         pixel->g += JEBP__AVG(top[-1].g, top->g);
@@ -1509,7 +1521,8 @@ static void jebp__vp8l_pred8(jebp_color_t *pixel, jebp_color_t *end, jebp_color_
     }
 }
 
-static void jebp__vp8l_pred9(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred9(jebp_color_t *pixel, jebp_color_t *end,
+                             jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
         pixel->r += JEBP__AVG(top->r, top[1].r);
         pixel->g += JEBP__AVG(top->g, top[1].g);
@@ -1518,32 +1531,37 @@ static void jebp__vp8l_pred9(jebp_color_t *pixel, jebp_color_t *end, jebp_color_
     }
 }
 
-static void jebp__vp8l_pred10(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred10(jebp_color_t *pixel, jebp_color_t *end,
+                              jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
-        pixel->r += JEBP__AVG(JEBP__AVG(pixel[-1].r, top[-1].r), JEBP__AVG(top->r, top[1].r));
-        pixel->g += JEBP__AVG(JEBP__AVG(pixel[-1].g, top[-1].g), JEBP__AVG(top->g, top[1].g));
-        pixel->b += JEBP__AVG(JEBP__AVG(pixel[-1].b, top[-1].b), JEBP__AVG(top->b, top[1].b));
-        pixel->a += JEBP__AVG(JEBP__AVG(pixel[-1].a, top[-1].a), JEBP__AVG(top->a, top[1].a));
+        pixel->r += JEBP__AVG(JEBP__AVG(pixel[-1].r, top[-1].r),
+                              JEBP__AVG(top->r, top[1].r));
+        pixel->g += JEBP__AVG(JEBP__AVG(pixel[-1].g, top[-1].g),
+                              JEBP__AVG(top->g, top[1].g));
+        pixel->b += JEBP__AVG(JEBP__AVG(pixel[-1].b, top[-1].b),
+                              JEBP__AVG(top->b, top[1].b));
+        pixel->a += JEBP__AVG(JEBP__AVG(pixel[-1].a, top[-1].a),
+                              JEBP__AVG(top->a, top[1].a));
     }
 }
 
 // I know that technically "paeth" refers to the full filter below (11) but I
 // could not find a better name for this
-JEBP__INLINE jebp__short_color_t jebp__vp8l_pred_paeth(jebp_color_t *pixel, jebp_color_t *top) {
+JEBP__INLINE jebp__short_color_t jebp__vp8l_pred_paeth(jebp_color_t *pixel,
+                                                       jebp_color_t *top) {
     return (jebp__short_color_t){
-        pixel[-1].r + top->r - top[-1].r,
-        pixel[-1].g + top->g - top[-1].g,
-        pixel[-1].b + top->b - top[-1].b,
-        pixel[-1].a + top->a - top[-1].a
-    };
+        pixel[-1].r + top->r - top[-1].r, pixel[-1].g + top->g - top[-1].g,
+        pixel[-1].b + top->b - top[-1].b, pixel[-1].a + top->a - top[-1].a};
 }
 
 JEBP__INLINE jebp_int jebp__vp8l_pred_dist(jebp_color_t *pixel,
                                            jebp__short_color_t *paeth) {
-    return JEBP__ABS(pixel->r - paeth->r) + JEBP__ABS(pixel->g - paeth->g) + JEBP__ABS(pixel->b - paeth->b) + JEBP__ABS(pixel->a - paeth->a);
+    return JEBP__ABS(pixel->r - paeth->r) + JEBP__ABS(pixel->g - paeth->g) +
+           JEBP__ABS(pixel->b - paeth->b) + JEBP__ABS(pixel->a - paeth->a);
 }
 
-static void jebp__vp8l_pred11(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred11(jebp_color_t *pixel, jebp_color_t *end,
+                              jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
         jebp__short_color_t paeth = jebp__vp8l_pred_paeth(pixel, top);
         jebp_int ldist = jebp__vp8l_pred_dist(pixel - 1, &paeth);
@@ -1556,7 +1574,8 @@ static void jebp__vp8l_pred11(jebp_color_t *pixel, jebp_color_t *end, jebp_color
     }
 }
 
-static void jebp__vp8l_pred12(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
+static void jebp__vp8l_pred12(jebp_color_t *pixel, jebp_color_t *end,
+                              jebp_color_t *top) {
     for (; pixel != end; pixel += 1, top += 1) {
         jebp__short_color_t paeth = jebp__vp8l_pred_paeth(pixel, top);
         pixel->r += JEBP__CLAMP_UBYTE(paeth.r);
@@ -1566,14 +1585,12 @@ static void jebp__vp8l_pred12(jebp_color_t *pixel, jebp_color_t *end, jebp_color
     }
 }
 
-static void jebp__vp8l_pred13(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top) {
-    for (; pixel != end; pixel += 1, top += 1) {                    
+static void jebp__vp8l_pred13(jebp_color_t *pixel, jebp_color_t *end,
+                              jebp_color_t *top) {
+    for (; pixel != end; pixel += 1, top += 1) {
         jebp_color_t avg = {
-            JEBP__AVG(pixel[-1].r, top->r),
-            JEBP__AVG(pixel[-1].g, top->g),
-            JEBP__AVG(pixel[-1].b, top->b),
-            JEBP__AVG(pixel[-1].a, top->a)
-        };
+            JEBP__AVG(pixel[-1].r, top->r), JEBP__AVG(pixel[-1].g, top->g),
+            JEBP__AVG(pixel[-1].b, top->b), JEBP__AVG(pixel[-1].a, top->a)};
         pixel->r += JEBP__CLAMP_UBYTE(avg.r + (avg.r - top[-1].r) / 2);
         pixel->g += JEBP__CLAMP_UBYTE(avg.g + (avg.g - top[-1].g) / 2);
         pixel->b += JEBP__CLAMP_UBYTE(avg.b + (avg.b - top[-1].b) / 2);
@@ -1626,7 +1643,10 @@ static void jebp__free_transform(jebp__transform_t *transform) {
     }
 }
 
-JEBP__INLINE jebp_error_t jebp__apply_predict_row(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *top, jebp_color_t *predict_pixel) {
+JEBP__INLINE jebp_error_t jebp__apply_predict_row(jebp_color_t *pixel,
+                                                  jebp_color_t *end,
+                                                  jebp_color_t *top,
+                                                  jebp_color_t *predict_pixel) {
     if (predict_pixel->g < JEBP__NB_VP8L_PRED_TYPES) {
         return JEBP_ERROR_INVDATA;
     }
@@ -1634,7 +1654,8 @@ JEBP__INLINE jebp_error_t jebp__apply_predict_row(jebp_color_t *pixel, jebp_colo
     return JEBP_OK;
 }
 
-JEBP__INLINE jebp_error_t jebp__apply_predict_transform(jebp_image_t *image, jebp__subimage_t *predict_image) {
+JEBP__INLINE jebp_error_t jebp__apply_predict_transform(
+    jebp_image_t *image, jebp__subimage_t *predict_image) {
     jebp_int block_size = 1 << predict_image->block_bits;
     jebp_int block_y = 0;
     jebp_color_t *predict_pixel = predict_image->pixels;
@@ -1676,7 +1697,8 @@ JEBP__INLINE jebp_error_t jebp__apply_predict_transform(jebp_image_t *image, jeb
     return JEBP_OK;
 }
 
-JEBP__INLINE void jebp__apply_color_row(jebp_color_t *pixel, jebp_color_t *end, jebp_color_t *color_pixel) {
+JEBP__INLINE void jebp__apply_color_row(jebp_color_t *pixel, jebp_color_t *end,
+                                        jebp_color_t *color_pixel) {
     for (; pixel != end; pixel += 1) {
         pixel->r += ((jebp_byte)pixel->g * (jebp_byte)color_pixel->b) >> 5;
         pixel->b += ((jebp_byte)pixel->g * (jebp_byte)color_pixel->g) >> 5;
@@ -1684,7 +1706,8 @@ JEBP__INLINE void jebp__apply_color_row(jebp_color_t *pixel, jebp_color_t *end, 
     }
 }
 
-JEBP__INLINE jebp_error_t jebp__apply_color_transform(jebp_image_t *image, jebp__subimage_t *color_image) {
+JEBP__INLINE jebp_error_t jebp__apply_color_transform(
+    jebp_image_t *image, jebp__subimage_t *color_image) {
     jebp_int block_size = 1 << color_image->block_bits;
     jebp_int block_y = 0;
     jebp_color_t *color_pixel = color_image->pixels;
@@ -1715,7 +1738,8 @@ JEBP__INLINE jebp_error_t jebp__apply_green_transform(jebp_image_t *image) {
     return JEBP_OK;
 }
 
-static jebp_error_t jebp__apply_transform(jebp__transform_t *transform, jebp_image_t *image) {
+static jebp_error_t jebp__apply_transform(jebp__transform_t *transform,
+                                          jebp_image_t *image) {
     switch (transform->type) {
     case JEBP__TRANSFORM_PREDICT:
         return jebp__apply_predict_transform(image, &transform->image);
