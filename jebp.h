@@ -1352,7 +1352,7 @@ static jebp_error_t jebp__read_vp8l_image(jebp_image_t *image,
         // Update the huffman group if needed
         if (huffman_image != NULL && pixel != end) {
             jebp_int delta_y = 0;
-            if (x > image->width) {
+            if (x >= image->width) {
                 y += x / image->width;
                 x %= image->width;
                 jebp_int huff_y = y >> huffman_image->block_bits;
