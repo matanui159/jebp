@@ -2,6 +2,7 @@
  * JebP - Single header WebP decoder
  */
 
+// TODO: consider changing this to MIT-0
 /**
  * LICENSE
  **
@@ -256,15 +257,6 @@
  *   `JEBP_ALLOC` and `JEBP_FREE` can be defined to functions for a custom
  *                allocator. They either both have to be defined or neither
  *                defined.
- *   `JEBP_ERROR` can be defined to a custom error handling. JebP uses `longjmp`
- *                to jump back to the top-level API function on error, to
- *                simplify error handling and checking. This might not be
- *                desirable for certain systems so this function allows for an
- *                alternative method. The provided function must not return and
- *                should be marked as non-returning. Alternatively it could be
- *                marked as unreachable to improve performance and code-size.
- *                However, it should not need to be said that THIS IS A VERY
- *                DUMB AND INSECURE IDEA so be very careful.
  *   `JEBP_LOG_ERRORS` will log a message to `stdout` as soon as an error occurs
  *                     with the line-number it happened on. Note that this will
  *                     include `stdio.h` even if `JEBP_NO_STDIO` is defined.
@@ -284,9 +276,6 @@
  *              and `JEBP_FREE`, using `malloc` and `free` respectively. If
  *              those macros are already defined to something else, this will
  *              not be included.
- *   `setjmp.h` is used for the default implementation of `JEBP_ERROR`, using
- *              `longjmp` and `setjmp`. If that macro is already defined, this
- *              will not be included.
  *   `emmintrin.h` and `arm_neon.h` is used for SIMD intrinsice. If
  *                 `JEBP_NO_SIMD` is defined these will not be included.
  *
@@ -561,22 +550,8 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 /**
  * Common utilities
  */
-// TODO: Maybe we should instead have a logging flag and add custom logs with
-//       more information to each error (and maybe other stuff like allocations)
-#ifdef JEBP_LOG_ERRORS
-#define JEBP__LOG(err)                                                         \
-    (printf("line %i: %s\n", __LINE__, jebp_error_string(err)), err)
-#define JEBP_ERROR_INVAL JEBP__LOG(1)
-#define JEBP_ERROR_INVDATA JEBP__LOG(2)
-#define JEBP_ERROR_INVDATA_HEADER JEBP__LOG(3)
-#define JEBP_ERROR_EOF JEBP__LOG(4)
-#define JEBP_ERROR_NOSUP JEBP__LOG(5)
-#define JEBP_ERROR_NOSUP_CODEC JEBP__LOG(6)
-#define JEBP_ERROR_NOSUP_PALETTE JEBP__LOG(7)
-#define JEBP_ERROR_NOMEM JEBP__LOG(8)
-#define JEBP_ERROR_IO JEBP__LOG(9)
-#endif // JEBP_LOG_ERRORS
-
+// TODO: Maybe we should  have a logging flag and add custom logs with more
+//       information to each error (and maybe other stuff like allocations)
 #define JEBP__MIN(a, b) ((a) < (b) ? (a) : (b))
 #define JEBP__MAX(a, b) ((a) > (b) ? (a) : (b))
 #define JEBP__ABS(a) ((a) < 0 ? -(a) : (a))
@@ -590,6 +565,8 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
                       *end = pixel + (image)->width * (image)->height;         \
          pixel != end;)
 
+// A simple utility that updates an error pointer if it currently does not have
+// an error
 JEBP__INLINE jebp_error_t jebp__error(jebp_error_t *err, jebp_error_t error) {
     if (*err == JEBP_OK) {
         *err = error;
@@ -697,7 +674,6 @@ static jebp_error_t jebp__read_bytes(jebp__reader_t *reader, size_t size,
 }
 
 // 8-bit uint reading is currently only used by the bit-reader
-// TODO: consider renaming to `jebp__read_byte`?
 #ifndef JEBP_NO_VP8L
 static jebp_ubyte jebp__read_uint8(jebp__reader_t *reader, jebp_error_t *err) {
     if (*err != JEBP_OK) {
@@ -887,8 +863,9 @@ static const jebp_byte jebp__meta_length_order[JEBP__NB_META_SYMBOLS];
 // Reverse increment, returns truthy on overflow
 JEBP__INLINE jebp_int jebp__increment_code(jebp_int *code, jebp_int length) {
     jebp_int inc = 1 << (length - 1);
-    for (; *code & inc; inc >>= 1)
-        ;
+    while (*code & inc) {
+        inc >>= 1;
+    }
     if (inc == 0) {
         return 1;
     }
@@ -1254,7 +1231,7 @@ static jebp_error_t jebp__read_vp8l_image(jebp_image_t *image,
                                           jebp__bit_reader_t *bits,
                                           jebp__colcache_t *colcache,
                                           jebp__subimage_t *huffman_image) {
-    jebp_error_t err = JEBP_OK;
+    jebp_error_t err;
     jebp_int nb_groups = 1;
     jebp__huffman_group_t *groups = &(jebp__huffman_group_t){0};
     if (huffman_image != NULL) {
@@ -1351,21 +1328,19 @@ static jebp_error_t jebp__read_vp8l_image(jebp_image_t *image,
 
         // Update the huffman group if needed
         if (huffman_image != NULL && pixel != end) {
-            jebp_int delta_y = 0;
+            jebp_int huff_y = huffman_y;
             if (x >= image->width) {
                 y += x / image->width;
                 x %= image->width;
-                jebp_int huff_y = y >> huffman_image->block_bits;
-                if (huff_y != huffman_y) {
-                    delta_y = huff_y - huffman_y;
-                    huffman_row += delta_y * huffman_image->width;
-                    huffman_y = huff_y;
-                }
+                huff_y = y >> huffman_image->block_bits;
+                huffman_row =
+                    &huffman_image->pixels[huff_y * huffman_image->width];
             }
             jebp_int huff_x = x >> huffman_image->block_bits;
-            if (huff_x != huffman_x || delta_y > 0) {
-                huffman_pixel = huffman_row + huff_x;
+            if (huff_x != huffman_x || huff_y != huffman_y) {
                 huffman_x = huff_x;
+                huffman_y = huff_y;
+                huffman_pixel = &huffman_row[huff_x];
                 group = &groups[huffman_pixel->g];
             }
         }
@@ -1641,17 +1616,6 @@ static void jebp__free_transform(jebp__transform_t *transform) {
     if (transform->type != JEBP__TRANSFORM_GREEN) {
         jebp_free_image((jebp_image_t *)&transform->image);
     }
-}
-
-JEBP__INLINE jebp_error_t jebp__apply_predict_row(jebp_color_t *pixel,
-                                                  jebp_color_t *end,
-                                                  jebp_color_t *top,
-                                                  jebp_color_t *predict_pixel) {
-    if (predict_pixel->g < JEBP__NB_VP8L_PRED_TYPES) {
-        return JEBP_ERROR_INVDATA;
-    }
-    jebp__vp8l_preds[predict_pixel->g](pixel, end, top);
-    return JEBP_OK;
 }
 
 JEBP__INLINE jebp_error_t jebp__apply_predict_transform(
