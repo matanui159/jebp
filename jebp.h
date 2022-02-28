@@ -257,9 +257,6 @@
  *   `JEBP_ALLOC` and `JEBP_FREE` can be defined to functions for a custom
  *                allocator. They either both have to be defined or neither
  *                defined.
- *   `JEBP_LOG_ERRORS` will log a message to `stdout` as soon as an error occurs
- *                     with the line-number it happened on. Note that this will
- *                     include `stdio.h` even if `JEBP_NO_STDIO` is defined.
  *
  * This single-header library requires C99 to be supported. Along with this it
  * requires the following headers from the system to successfully compile. Some
@@ -528,7 +525,7 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #elif defined(__aarch64) || defined(__aarch64__) || defined(_M_ARM64)
 #if !defined(__ARM_BIG_ENDIAN) || defined(__LITTLE_ENDIAN__)
 #define JEBP__LITTLE_ENDIAN
-#endif // __ARM_BIG_ENDIAN
+#endif
 #define JEBP__SIMD_NEON
 #else
 #ifdef __LITTLE_ENDIAN__
@@ -1618,18 +1615,31 @@ static void jebp__free_transform(jebp__transform_t *transform) {
     }
 }
 
+JEBP__INLINE jebp_error_t jebp__apply_predict_row(jebp_color_t *pixel,
+                                                  jebp_color_t *end,
+                                                  jebp_color_t *top,
+                                                  jebp_color_t *predict_pixel) {
+    if (predict_pixel->g >= JEBP__NB_VP8L_PRED_TYPES) {
+        return JEBP_ERROR_INVDATA;
+    }
+    jebp__vp8l_preds[predict_pixel->g](pixel, end, top);
+    return JEBP_OK;
+}
+
 JEBP__INLINE jebp_error_t jebp__apply_predict_transform(
     jebp_image_t *image, jebp__subimage_t *predict_image) {
+    jebp_error_t err;
     jebp_int block_size = 1 << predict_image->block_bits;
+    jebp_int end_size = image->width - (predict_image->width - 1) * block_size;
     jebp_int block_y = 0;
     jebp_color_t *predict_pixel = predict_image->pixels;
     jebp_color_t *top = image->pixels;
     JEBP__LOOP_IMAGE(image) {
         if (pixel == image->pixels) {
-            jebp_color_t *row_end = pixel + image->width;
+            jebp_color_t *top_end = pixel + image->width;
             // Use opaque-black prediction for the top-left pixel
             jebp__vp8l_pred_black(pixel++);
-            for (; pixel != row_end; pixel += 1) {
+            for (; pixel != top_end; pixel += 1) {
                 // Use left prediction for the top row
                 jebp__vp8l_pred_left(pixel);
             }
@@ -1637,20 +1647,28 @@ JEBP__INLINE jebp_error_t jebp__apply_predict_transform(
             continue;
         }
 
-        jebp_color_t *row_end = pixel + image->width;
         // Use top prediction for the left column
         jebp__vp8l_pred_top(pixel++, top++);
-        jebp_int size = JEBP__MIN((jebp_int)(row_end - pixel), block_size - 1);
-        while (pixel != row_end) {
-            if (predict_pixel->g >= JEBP__NB_VP8L_PRED_TYPES) {
-                return JEBP_ERROR_INVDATA;
+        jebp_int offset = 1;
+        for (jebp_int i = 0; i < predict_image->width - 1; i += 1) {
+            jebp_int size = block_size - offset;
+            if ((err = jebp__apply_predict_row(pixel, pixel + size, top,
+                                               predict_pixel)) != JEBP_OK) {
+                return err;
             }
-            jebp__vp8l_preds[predict_pixel->g](pixel, pixel + size, top);
             pixel += size;
             top += size;
             predict_pixel += 1;
-            size = JEBP__MIN((jebp_int)(row_end - pixel), block_size);
+            offset = 0;
         }
+        jebp_int size = end_size - offset;
+        if ((err = jebp__apply_predict_row(pixel, pixel + size, top,
+                                           predict_pixel)) != JEBP_OK) {
+            return err;
+        }
+        pixel += size;
+        top += size;
+        predict_pixel += 1;
         block_y += 1;
         if (block_y < block_size) {
             predict_pixel -= predict_image->width;
@@ -1673,16 +1691,18 @@ JEBP__INLINE void jebp__apply_color_row(jebp_color_t *pixel, jebp_color_t *end,
 JEBP__INLINE jebp_error_t jebp__apply_color_transform(
     jebp_image_t *image, jebp__subimage_t *color_image) {
     jebp_int block_size = 1 << color_image->block_bits;
+    jebp_int end_size = image->width - (color_image->width - 1) * block_size;
     jebp_int block_y = 0;
     jebp_color_t *color_pixel = color_image->pixels;
     JEBP__LOOP_IMAGE(image) {
-        jebp_color_t *row_end = pixel + image->width;
-        while (pixel != row_end) {
-            jebp_int size = JEBP__MIN((jebp_int)(row_end - pixel), block_size);
-            jebp__apply_color_row(pixel, pixel + size, color_pixel);
-            pixel += size;
+        for (jebp_int i = 0; i < color_image->width - 1; i += 1) {
+            jebp__apply_color_row(pixel, pixel + block_size, color_pixel);
+            pixel += block_size;
             color_pixel += 1;
         }
+        jebp__apply_color_row(pixel, pixel + end_size, color_pixel);
+        pixel += end_size;
+        color_pixel += 1;
         block_y += 1;
         if (block_y < block_size) {
             color_pixel -= color_image->width;
