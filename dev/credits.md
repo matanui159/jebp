@@ -1,4 +1,17 @@
-### [`lossless/rose.webp`](lossless/rose.webp)
+### [`lossy/tree.webp`](lossy/tree.webp)
+Image: "A Wild Cherry (Prunus avium) in flower" \
+Image Author: Benjamin Gimmel \
+[JPEG source](https://upload.wikimedia.org/wikipedia/commons/5/57/Frühling_blühender_Kirschenbaum.jpg) \
+Photo licensed under the [Creative Commons][cc] [Attribution-Share Alike 3.0 Unported][by-sa] license.
+
+### [`lossy/fire.webp`](lossy/fire.webp)
+Image: Fire breathing "Jaipur Maharaja Brass Band" Chassepierre Belgium \
+Author: Luc Viatour \
+[JPEG source](https://upload.wikimedia.org/wikipedia/commons/0/02/Fire_breathing_2_Luc_Viatour.jpg) \
+Photo licensed under the [Creative Commons][cc] [Attribution-Share Alike 3.0 Unported][by-sa] license. \
+Author website at [www.lucnix.be](https://www.lucnix.be/)
+
+### [`lossy/rose.webp`](lossy/rose.webp), [`lossless/rose.webp`](lossless/rose.webp)
 "Free Stock Photo in High Resolution - Yellow Rose 3 - Flowers" \
 Image Author: Jon Sullivan \
 This file is in the public domain. \

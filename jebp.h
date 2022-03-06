@@ -101,9 +101,9 @@
  *                      the specification when writing.
  *   `JEBP_ERROR_NOSUP_CODEC` is a suberror of `NOSUP` that indicates that the
  *                      RIFF chunk that is most likely for the codec is not
- *                      recognized. Currently lossy images are not supported
- *                      (see below) and lossless image support can be disabled
- *                      (see `JEBP_NO_VP8L`).
+ *                      recognized. Currently extended file formats (see below)
+ *                      are not supported and both lossy and lossless codecs can
+ *                      be disabled (see `JEBP_NO_VP8` and `JEBP_NO_VP8L`).
  *   `JEBP_ERROR_NOSUP_PALETTE` is a suberror of `NOSUP` that indicates that the
  *                      image has a color-index transform (in WebP terminology,
  *                      this would be a paletted image). Color-indexing
@@ -126,7 +126,6 @@
  *
  * This is not a feature-complete WebP decoder and has the following
  * limitations:
- *   - Does not support decoding lossy files with VP8.
  *   - Does not support extended file-formats with VP8X.
  *   - Does not support VP8L lossless images with the color-indexing transform
  *     (palleted images).
@@ -149,9 +148,12 @@
  *   `JEBP_NO_STDIO` will disable the file-reading API.
  *   `JEBP_NO_SIMD` will disable SIMD optimizations. These are currently
  *                  not-used but the detection is there ready for further work.
+ *   `JEBP_NO_VP8` will disable VP8 (lossy) decoding support.
  *   `JEBP_NO_VP8L` will disable VP8L (lossless) decoding support. Note that
- *                  currently this will make all images fail since VP8L is the
- *                  only supported codec right now.
+ *                  either VP8 or VP8L decoding support is required and it is an
+ *                  error to disable both.
+ *   `JEBP_ONLY_VP8` and `JEBP_ONLY_VP8L` will disable all other features except
+ *                   the specified feature.
  *   `JEBP_ALLOC` and `JEBP_FREE` can be defined to functions for a custom
  *                allocator. They either both have to be defined or neither
  *                defined.
@@ -181,9 +183,10 @@
  *                      checks for C11 support to use `_Noreturn`.
  *   `__has_attribute` and `__has_builtin` are used to detect the `noreturn` and
  *                     `always_inline` attributes, along with the
- *                     `__builtin_bswap32` builtin. Note that `__has_attribute`
- *                     does not fallback to compiler-version checks since most
- *                     compilers already support `__has_attribute`.
+ *                     `__builtin_bswap16` and `__builtin_bswap32` builtins.
+ *                     Note that `__has_attribute` does not fallback to compiler
+ *                     version checks since most compilers already support
+ *                     `__has_attribute`.
  *   `__GNUC__` and `__GNUC_MINOR__` are used to detect if the compiler is GCC
  *              (or GCC compatible) and what version of GCC it is. This, in
  *              turn, is used to polyfill `__has_builtin` on older compilers
@@ -333,6 +336,18 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #error "Both JEBP_ALLOC and JEBP_FREE have to be defined"
 #endif
 
+#if defined(JEBP_ONLY_VP8) || defined(JEBP_ONLY_VP8L)
+#ifndef JEBP_ONLY_VP8
+#define JEBP_NO_VP8
+#endif // JEBP_ONLY_VP8
+#ifndef JEBP_ONLY_VP8L
+#define JEBP_NO_VP8L
+#endif // JEBP_ONLY_VP8L
+#endif
+#if defined(JEBP_NO_VP8) && defined(JEBP_NO_VP8L)
+#error "Either VP8 or VP8L has to be enabled"
+#endif
+
 /**
  * Predefined macro detection
  */
@@ -389,8 +404,14 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
     JEBP__VERSION##builtin != 0 && JEBP__GNU_VERSION >= JEBP__VERSION##builtin
 // I believe this was added earlier but GCC 4.3 is the first time it was
 // mentioned in the changelog and manual.
+#define JEBP__VERSION__builtin_bswap16 403
 #define JEBP__VERSION__builtin_bswap32 403
 #endif // __has_builtin
+#if JEBP__HAS_BUILTIN(__builtin_bswap16)
+#define JEBP__SWAP16(value) __builtin_bswap16(value)
+#elif defined(_MSC_VER)
+#define JEBP__SWAP16(value) _byteswap_ushort(value)
+#endif
 #if JEBP__HAS_BUILTIN(__builtin_bswap32)
 #define JEBP__SWAP32(value) __builtin_bswap32(value)
 #elif defined(_MSC_VER)
@@ -459,6 +480,8 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #define JEBP__CEIL_SHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
 #define JEBP__CLAMP(x, min, max) JEBP__MIN(JEBP__MAX(x, min), max)
 #define JEBP__CLAMP_UBYTE(x) JEBP__CLAMP(x, 0, 255)
+#define JEBP__SET_MASK(x, m, v) ((x) = ((x) & ~(m)) | ((v) & (m)))
+#define JEBP__SET_BIT(x, b, v) JEBP__SET_MASK(x, b, (v) ? (b) : 0)
 #define JEBP__CLEAR(ptr, size) memset(ptr, 0, size)
 
 // A simple utility that updates an error pointer if it currently does not have
@@ -470,10 +493,6 @@ JEBP__INLINE jebp_error_t jebp__error(jebp_error_t *err, jebp_error_t error) {
     return *err;
 }
 
-// Currently only used by VP8L
-// TODO: after VP8(no-L) support is added, make it an error to remove both
-//       VP8 and VP8L
-#ifndef JEBP_NO_VP8L
 static jebp_error_t jebp__alloc_image(jebp_image_t *image) {
     image->pixels =
         JEBP_ALLOC(image->width * image->height * sizeof(jebp_color_t));
@@ -482,7 +501,6 @@ static jebp_error_t jebp__alloc_image(jebp_image_t *image) {
     }
     return JEBP_OK;
 }
-#endif // JEBP_NO_VP8L
 
 /**
  * Reader abstraction
@@ -569,8 +587,44 @@ static jebp_error_t jebp__read_bytes(jebp__reader_t *reader, size_t size,
     return JEBP_OK;
 }
 
-// 8-bit uint reading is currently only used by the bit-reader
-#ifndef JEBP_NO_VP8L
+// Reader mapping is only used by VP8
+#ifndef JEBP_NO_VP8
+static jebp_error_t jebp__map_reader(jebp__reader_t *reader,
+                                     jebp__reader_t *map, size_t size) {
+    jebp_error_t err;
+#ifndef JEBP_NO_STDIO
+    if (reader->file != NULL) {
+        void *data = JEBP_ALLOC(size);
+        if (data == NULL) {
+            return JEBP_ERROR_NOMEM;
+        }
+        if ((err = jebp__read_bytes(reader, size, data)) != JEBP_OK) {
+            JEBP_FREE(data);
+            return err;
+        }
+        jebp__init_memory(map, size, data);
+        map->buffer = data;
+        return JEBP_OK;
+    }
+    map->buffer = NULL;
+#endif // JEBP_NO_STDIO
+    const void *data = reader->bytes;
+    if ((err = jebp__read_bytes(reader, size, NULL)) != JEBP_OK) {
+        return err;
+    }
+    jebp__init_memory(map, size, data);
+    return JEBP_OK;
+}
+
+static void jebp__unmap_reader(jebp__reader_t *map) {
+#ifndef JEBP_NO_STDIO
+    JEBP_FREE(map->buffer);
+#else  // JEBP_NO_STDIO
+    (void)map;
+#endif // JEBP_NO_STDIO
+}
+#endif // JEBP_NO_VP8
+
 static jebp_ubyte jebp__read_uint8(jebp__reader_t *reader, jebp_error_t *err) {
     if (*err != JEBP_OK) {
         return 0;
@@ -581,7 +635,41 @@ static jebp_ubyte jebp__read_uint8(jebp__reader_t *reader, jebp_error_t *err) {
     reader->nb_bytes -= 1;
     return *(reader->bytes++);
 }
-#endif // JEBP_NO_VP8L
+
+// 16-bit and 24-bit uint reading is only used by VP8
+#ifndef JEBP_NO_VP8
+static jebp_ushort jebp__read_uint16(jebp__reader_t *reader,
+                                     jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+#ifdef JEBP__LITTLE_ENDIAN
+    jebp_ushort value = 0;
+    *err = jebp__read_bytes(reader, 2, &value);
+    return value;
+#else  // JEBP__LITTLE_ENDIAN
+    jebp_ubyte bytes[2];
+    *err = jebp__read_bytes(reader, 2, bytes);
+    return bytes[0] | (bytes[1] << 8);
+#endif // JEBP__LITTLE_ENDIAN
+}
+
+static jebp_int jebp__read_uint24(jebp__reader_t *reader, jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+#ifdef JEBP__LITTLE_ENDIAN
+    jebp_int value = 0;
+    *err = jebp__read_bytes(reader, 3, &value);
+    return value;
+#else  // JEBP__LITTLE_ENDIAN
+    jebp_ubyte bytes[3];
+    *err = jebp__read_bytes(reader, 3, bytes);
+    return (jebp_int)bytes[0] | ((jebp_int)bytes[1] << 8) |
+           ((jebp_int)bytes[2] << 16);
+#endif // JEBP__LITTLE_ENDIAN
+}
+#endif // JEBP_NO_VP8
 
 static jebp_uint jebp__read_uint32(jebp__reader_t *reader, jebp_error_t *err) {
     if (*err != JEBP_OK) {
@@ -652,6 +740,1212 @@ static jebp_error_t jebp__read_riff_chunk(jebp__riff_reader_t *riff,
     riff->header.size -= chunk->size;
     return JEBP_OK;
 }
+
+/**
+ * YUV image
+ */
+#ifndef JEBP_NO_VP8
+
+//  R = 255 * ((Y-16)/219 + (Cr-128)/224 * 1.402)
+#define JEBP__CONVERT_R(y, v)                                                  \
+    JEBP__CLAMP_UBYTE(((y)*298 + (v)*409 - 57068) >> 8)
+// Eg = (Ey - Er*0.299 - Eb*0.114)/0.587
+//    = Ey/0.587 - (Ey+Ecr*1.402)*(0.299/0.587) - (Ey+Ecb*1.772)*(0.114/0.587)
+//    = Ey - Ecr*(1.402*0.299/0.587) - Ecb*(1.772*0.114/0.587)
+//  G = 255 * ((Y-16)/219 - (Cr-128)/224 * (1.402*0.299/0.587) - (Cb-128)/224 *
+//      (1.772*0.114/0.587))
+#define JEBP__CONVERT_G(y, u, v)                                               \
+    JEBP__CLAMP_UBYTE(((y)*298 - (u)*208 - (v)*100 + 34707) >> 8)
+//  B = 255 * ((Y-16)/219 + (Cb - 128)/224 * 1.772)
+#define JEBP__CONVERT_B(y, u)                                                  \
+    JEBP__CLAMP_UBYTE(((y)*298 + (u)*516 - 70870) >> 8)
+
+typedef struct jebp__yuv_image_t {
+    jebp_int width;
+    jebp_int height;
+    jebp_int uv_width;
+    jebp_int uv_height;
+    jebp_ubyte *y;
+    jebp_ubyte *u;
+    jebp_ubyte *v;
+} jebp__yuv_image_t;
+
+static jebp_error_t jebp__alloc_yuv_image(jebp__yuv_image_t *image) {
+    image->uv_width = JEBP__CEIL_SHIFT(image->width, 1);
+    image->uv_height = JEBP__CEIL_SHIFT(image->height, 1);
+    size_t y_size = image->width * image->height;
+    size_t uv_size = image->uv_width * image->uv_height;
+    image->y = JEBP_ALLOC(y_size + uv_size * 2);
+    if (image->y == NULL) {
+        return JEBP_ERROR_NOMEM;
+    }
+    image->u = image->y + y_size;
+    image->v = image->u + uv_size;
+    return JEBP_OK;
+}
+
+static void jebp__free_yuv_image(jebp__yuv_image_t *image) {
+    JEBP_FREE(image->y);
+}
+
+JEBP__INLINE void jebp__upscale_uv_row(jebp_ubyte *out, jebp_ubyte *in,
+                                       jebp_int stride) {
+    jebp_ubyte *end = in + stride - 1;
+    jebp_ubyte prev = *(in++);
+    while (in != end) {
+        *(out++) = prev;
+        jebp_ubyte next = *(in++);
+        *(out++) = (prev + next) / 2;
+        prev = next;
+    }
+    *(out++) = prev;
+    *(out++) = prev;
+}
+
+static jebp_error_t jebp__convert_yuv_image(jebp_image_t *out,
+                                            jebp__yuv_image_t *in) {
+    // Buffers to upscale UV rows into
+    jebp_ubyte *uv_buffer = JEBP_ALLOC(in->width * 4);
+    if (uv_buffer == NULL) {
+        return JEBP_ERROR_NOMEM;
+    }
+    jebp_ubyte *u_prev = uv_buffer;
+    jebp_ubyte *v_prev = u_prev + in->width;
+    jebp_ubyte *u_next = v_prev + in->width;
+    jebp_ubyte *v_next = u_next + in->width;
+
+    jebp_ubyte *y = in->y;
+    jebp_ubyte *u = in->u;
+    jebp_ubyte *v = in->v;
+    jebp_ubyte *u_end = u + in->uv_width * in->uv_height;
+    jebp__upscale_uv_row(u_prev, u, in->uv_width);
+    jebp__upscale_uv_row(v_prev, v, in->uv_width);
+    u += in->uv_width;
+    v += in->uv_width;
+    jebp_int y_padding = in->width - out->width;
+
+    JEBP__LOOP_IMAGE(out) {
+        // Rec. 601 doesn't specify the chroma location for 420, for now I'm
+        // assuming it is top-left
+        // Even rows
+        jebp_ubyte *up = u_prev;
+        jebp_ubyte *vp = v_prev;
+        for (jebp_int i = 0; i < out->width; i += 1) {
+            pixel->r = JEBP__CONVERT_R(*y, *vp);
+            pixel->g = JEBP__CONVERT_G(*y, *up, *vp);
+            pixel->b = JEBP__CONVERT_B(*y, *up);
+            pixel->a = 255;
+            pixel += 1;
+            y += 1;
+            up += 1;
+            vp += 1;
+        }
+        y += y_padding;
+        if (pixel == end) {
+            break;
+        }
+        // Upscale next row
+        if (u == u_end) {
+            u_next = u_prev;
+        } else {
+            jebp__upscale_uv_row(u_next, u, in->uv_width);
+            jebp__upscale_uv_row(v_next, v, in->uv_width);
+            u += in->uv_width;
+            v += in->uv_width;
+        }
+
+        // Odd rows
+        up = u_prev;
+        vp = v_prev;
+        jebp_ubyte *un = u_next;
+        jebp_ubyte *vn = v_next;
+        for (jebp_int i = 0; i < out->width; i += 1) {
+            jebp_ubyte u_avg = (*(up++) + *(un++)) / 2;
+            jebp_ubyte v_avg = (*(vp++) + *(vn++)) / 2;
+            pixel->r = JEBP__CONVERT_R(*y, v_avg);
+            pixel->g = JEBP__CONVERT_G(*y, u_avg, v_avg);
+            pixel->b = JEBP__CONVERT_B(*y, u_avg);
+            pixel->a = 255;
+            pixel += 1;
+            y += 1;
+        }
+        // Swap buffers
+        jebp_ubyte *tmp;
+        tmp = u_prev;
+        u_prev = u_next;
+        u_next = tmp;
+        tmp = v_prev;
+        v_prev = v_next;
+        v_next = tmp;
+    }
+    JEBP_FREE(uv_buffer);
+    return JEBP_OK;
+}
+
+/**
+ * Boolean entropy coding
+ */
+#define JEBP__NB_PROBS(nb) ((nb)-1)
+#define JEBP__NB_TREE(nb) (2 * JEBP__NB_PROBS(nb))
+
+typedef struct jebp__bec_reader_t {
+    jebp__reader_t *reader;
+    size_t nb_bytes;
+    jebp_int nb_bits;
+    jebp_int value;
+    jebp_int range;
+} jebp__bec_reader_t;
+
+static jebp_error_t jebp__init_bec_reader(jebp__bec_reader_t *bec,
+                                          jebp__reader_t *reader, size_t size) {
+    jebp_error_t err;
+    if (size < 2) {
+        return JEBP_ERROR_INVDATA;
+    }
+    bec->reader = reader;
+    bec->nb_bytes = size - 2;
+    bec->nb_bits = 8;
+#if defined(JEBP__LITTLE_ENDIAN) && defined(JEBP__SWAP16)
+    jebp_ushort value = 0;
+    err = jebp__read_bytes(reader, 2, &value);
+    bec->value = JEBP__SWAP16(value);
+#else
+    jebp_ubyte bytes[2];
+    err = jebp__read_bytes(reader, 2, bytes);
+    bec->value = (bytes[0] << 8) | bytes[1];
+#endif
+    if (err != JEBP_OK) {
+        return err;
+    }
+    bec->range = 255;
+    return JEBP_OK;
+}
+
+// TODO: this code can definitely be improved, especially since its used alot
+//       and probably needs to be very fast. Notable changes:
+//        - instead of a while loop do all the shifts at once
+//        - fetch 16 or 24-bits at a time from the reader (instead of
+//          byte-by-byte)
+//        - check bit size and fetch more if needed at the start of a new call
+//          (instead of at the end of the previous call)
+//        - optimize the prob = 128 variant, maybe optimize int reading with
+//          multiple prob=128 bits
+//        - it might be possible to simplify the split calculation by always
+//          storing the range with -1
+//        - instead of shifting the value, use nb_bits as a shift offset of the
+//          value
+static jebp_int jebp__read_bool(jebp__bec_reader_t *bec, jebp_ubyte prob,
+                                jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+    jebp_int split = 1 + (((bec->range - 1) * prob) >> 8);
+    jebp_int split_high = split << 8;
+    jebp_int boolval = bec->value >= split_high;
+    if (boolval) {
+        bec->value -= split_high;
+        bec->range -= split;
+    } else {
+        bec->range = split;
+    }
+
+    while (bec->range < 128) {
+        bec->value <<= 1;
+        bec->range <<= 1;
+        bec->nb_bits -= 1;
+        if (bec->nb_bits == 0) {
+            if (bec->nb_bytes == 0) {
+                jebp__error(err, JEBP_ERROR_INVDATA);
+                return 0;
+            }
+            bec->value |= jebp__read_uint8(bec->reader, err);
+            bec->nb_bytes -= 1;
+            bec->nb_bits = 8;
+        }
+    }
+    return boolval;
+}
+
+JEBP__INLINE jebp_int jebp__read_flag(jebp__bec_reader_t *bec,
+                                      jebp_error_t *err) {
+    return jebp__read_bool(bec, 128, err);
+}
+
+static jebp_uint jebp__read_bec_uint(jebp__bec_reader_t *bec, jebp_int size,
+                                     jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+    jebp_uint value = 0;
+    for (jebp_int i = 0; i < size; i += 1) {
+        value = (value << 1) | jebp__read_flag(bec, err);
+    }
+    return value;
+}
+
+static jebp_int jebp__read_bec_int(jebp__bec_reader_t *bec, jebp_int size,
+                                   jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+    jebp_int value = jebp__read_bec_uint(bec, size, err);
+    return jebp__read_flag(bec, err) ? -value : value;
+}
+
+static jebp_int jebp__read_tree(jebp__bec_reader_t *bec, const jebp_byte *tree,
+                                const jebp_ubyte *probs, jebp_error_t *err) {
+    jebp_int index = 0;
+    do {
+        const jebp_byte *node = &tree[index];
+        index = node[jebp__read_bool(bec, probs[index / 2], err)];
+    } while (index > 0);
+    return -index;
+}
+
+/**
+ * Compressed B.E.C. header
+ */
+#define JEBP__NB_SEGMENTS 4
+#define JEBP__NB_QUANT_INDEXES 128
+#define JEBP__NB_COEFFS 16
+#define JEBP__NB_COEFF_BANDS 8
+#define JEBP__NB_TOKEN_COMPLEXITIES 3
+#define JEBP__CLAMP_QUANT(q) JEBP__CLAMP(q, 0, JEBP__NB_QUANT_INDEXES - 1)
+
+typedef enum jebp__segment_type_t {
+    JEBP__SEGMENT_NONE = -1,
+    JEBP__SEGMENT_ZERO,
+    JEBP__SEGMENT_ID
+} jebp__segment_type_t;
+
+typedef struct jebp__quants_t {
+    jebp_short y_dc;
+    jebp_short y_ac;
+    jebp_short y2_dc;
+    jebp_short y2_ac;
+    jebp_short uv_dc;
+    jebp_short uv_ac;
+} jebp__quants_t;
+
+typedef struct jebp__segment_t {
+    jebp__quants_t quants;
+    jebp_short filter_strength;
+} jebp__segment_t;
+
+typedef enum jebp__block_type_t {
+    JEBP__BLOCK_Y1, // Y beginning at 1
+    JEBP__BLOCK_Y2, // WHT block of DC values
+    JEBP__BLOCK_UV,
+    JEBP__BLOCK_Y0, // Y beginning at 0
+    JEBP__NB_BLOCK_TYPES
+} jebp__block_type_t;
+
+typedef enum jebp__token_t {
+    JEBP__TOKEN_COEFF0,
+    JEBP__TOKEN_COEFF1,
+    JEBP__TOKEN_COEFF2,
+    JEBP__TOKEN_COEFF3,
+    JEBP__TOKEN_COEFF4,
+    JEBP__TOKEN_EXTRA1,
+    JEBP__TOKEN_EXTRA2,
+    JEBP__TOKEN_EXTRA3,
+    JEBP__TOKEN_EXTRA4,
+    JEBP__TOKEN_EXTRA5,
+    JEBP__TOKEN_EXTRA6,
+    JEBP__TOKEN_EOB,
+    JEBP__NB_TOKENS,
+    JEBP__NB_EXTRA_TOKENS = JEBP__TOKEN_EOB - JEBP__TOKEN_EXTRA1
+} jebp__token_t;
+
+typedef struct jebp__vp8_header_t {
+    jebp_int bec_size;
+    jebp__segment_type_t segment_type;
+    jebp_int abs_segments;
+    jebp__segment_t segments[JEBP__NB_SEGMENTS];
+    jebp_ubyte segment_probs[JEBP__NB_PROBS(JEBP__NB_SEGMENTS)];
+    jebp_int simple_filter;
+    jebp_short filter_strength;
+    jebp_short filter_sharpness;
+    jebp_ubyte token_probs[JEBP__NB_BLOCK_TYPES][JEBP__NB_COEFF_BANDS]
+                          [JEBP__NB_TOKEN_COMPLEXITIES]
+                          [JEBP__NB_PROBS(JEBP__NB_TOKENS)];
+} jebp__vp8_header_t;
+
+static const jebp_short jebp__dc_quant_table[JEBP__NB_QUANT_INDEXES];
+static const jebp_short jebp__ac_quant_table[JEBP__NB_QUANT_INDEXES];
+static const jebp_ubyte
+    jebp__default_token_probs[JEBP__NB_BLOCK_TYPES][JEBP__NB_COEFF_BANDS]
+                             [JEBP__NB_TOKEN_COMPLEXITIES]
+                             [JEBP__NB_PROBS(JEBP__NB_TOKENS)];
+static const jebp_ubyte
+    jebp__update_token_probs[JEBP__NB_BLOCK_TYPES][JEBP__NB_COEFF_BANDS]
+                            [JEBP__NB_TOKEN_COMPLEXITIES]
+                            [JEBP__NB_PROBS(JEBP__NB_TOKENS)];
+
+static void jebp__init_vp8_header(jebp__vp8_header_t *hdr) {
+    JEBP__CLEAR(hdr, sizeof(jebp__vp8_header_t));
+    hdr->segment_type = JEBP__SEGMENT_NONE;
+    hdr->abs_segments = 1;
+    memset(hdr->segment_probs, 255, sizeof(hdr->segment_probs));
+    memcpy(hdr->token_probs, jebp__default_token_probs,
+           sizeof(hdr->token_probs));
+}
+
+static jebp_error_t jebp__read_segment_header(jebp__vp8_header_t *hdr,
+                                              jebp__bec_reader_t *bec) {
+    jebp_error_t err = JEBP_OK;
+    if (!jebp__read_flag(bec, &err)) {
+        // no segments
+        return err;
+    }
+    hdr->segment_type = jebp__read_flag(bec, &err);
+    if (jebp__read_flag(bec, &err)) {
+        // update segment data
+        hdr->abs_segments = jebp__read_flag(bec, &err);
+        for (jebp_int i = 0; i < JEBP__NB_SEGMENTS; i += 1) {
+            if (jebp__read_flag(bec, &err)) {
+                hdr->segments[i].quants.y_ac = jebp__read_bec_int(bec, 7, &err);
+            }
+        }
+        for (jebp_int i = 0; i < JEBP__NB_SEGMENTS; i += 1) {
+            if (jebp__read_flag(bec, &err)) {
+                hdr->segments[i].filter_strength =
+                    jebp__read_bec_int(bec, 6, &err);
+            }
+        }
+    }
+    if (hdr->segment_type == JEBP__SEGMENT_ID) {
+        for (jebp_int i = 0; i < JEBP__NB_PROBS(JEBP__NB_SEGMENTS); i += 1) {
+            if (jebp__read_flag(bec, &err)) {
+                hdr->segment_probs[i] = jebp__read_bec_uint(bec, 8, &err);
+            }
+        }
+    }
+    return err;
+}
+
+static jebp_error_t jebp__read_filter_header(jebp__vp8_header_t *hdr,
+                                             jebp__bec_reader_t *bec) {
+    jebp_error_t err = JEBP_OK;
+    hdr->simple_filter = jebp__read_flag(bec, &err);
+    hdr->filter_strength = jebp__read_bec_uint(bec, 6, &err);
+    hdr->filter_sharpness = jebp__read_bec_uint(bec, 3, &err);
+    if (jebp__read_flag(bec, &err)) {
+        // TODO: support filter adjustments
+        return jebp__error(&err, JEBP_ERROR_NOSUP);
+    }
+    return err;
+}
+
+static void jebp__update_quants(jebp__quants_t *quants,
+                                jebp__quants_t *deltas) {
+    quants->y_dc =
+        jebp__dc_quant_table[JEBP__CLAMP_QUANT(deltas->y_ac + deltas->y_dc)];
+    quants->y_ac = jebp__ac_quant_table[JEBP__CLAMP_QUANT(deltas->y_ac)];
+    quants->y2_dc =
+        jebp__dc_quant_table[JEBP__CLAMP_QUANT(deltas->y_ac + deltas->y2_dc)];
+    quants->y2_dc *= 2;
+    quants->y2_ac =
+        jebp__ac_quant_table[JEBP__CLAMP_QUANT(deltas->y_ac + deltas->y2_ac)];
+    quants->y2_ac = JEBP__MAX(quants->y2_ac * 155 / 100, 8);
+    quants->uv_dc =
+        jebp__dc_quant_table[JEBP__CLAMP_QUANT(deltas->y_ac + deltas->uv_dc)];
+    quants->uv_dc = JEBP__MIN(quants->uv_dc, 132);
+    quants->uv_ac =
+        jebp__ac_quant_table[JEBP__CLAMP_QUANT(deltas->y_ac + deltas->uv_ac)];
+}
+
+static jebp_error_t jebp__read_quant_header(jebp__vp8_header_t *hdr,
+                                            jebp__bec_reader_t *bec) {
+    jebp_error_t err = JEBP_OK;
+    jebp__quants_t deltas;
+    jebp_int y_ac = jebp__read_bec_uint(bec, 7, &err);
+    deltas.y_dc =
+        jebp__read_flag(bec, &err) ? jebp__read_bec_int(bec, 4, &err) : 0;
+    deltas.y2_dc =
+        jebp__read_flag(bec, &err) ? jebp__read_bec_int(bec, 4, &err) : 0;
+    deltas.y2_ac =
+        jebp__read_flag(bec, &err) ? jebp__read_bec_int(bec, 4, &err) : 0;
+    deltas.uv_dc =
+        jebp__read_flag(bec, &err) ? jebp__read_bec_int(bec, 4, &err) : 0;
+    deltas.uv_ac =
+        jebp__read_flag(bec, &err) ? jebp__read_bec_int(bec, 4, &err) : 0;
+
+    if (hdr->segment_type == JEBP__SEGMENT_NONE) {
+        deltas.y_ac = y_ac;
+        jebp__update_quants(&hdr->segments->quants, &deltas);
+        return err;
+    }
+    if (hdr->abs_segments) {
+        y_ac = 0;
+    }
+    for (jebp_int i = 0; i < JEBP__NB_SEGMENTS; i += 1) {
+        jebp__quants_t *quants = &hdr->segments[i].quants;
+        deltas.y_ac = y_ac + quants->y_ac;
+        jebp__update_quants(quants, &deltas);
+    }
+    return err;
+}
+
+static jebp_error_t jebp__read_token_header(jebp__vp8_header_t *hdr,
+                                            jebp__bec_reader_t *bec) {
+    jebp_error_t err = JEBP_OK;
+    jebp_ubyte *probs = hdr->token_probs[0][0][0];
+    const jebp_ubyte *update_probs = jebp__update_token_probs[0][0][0];
+    for (size_t i = 0; i < sizeof(jebp__update_token_probs); i += 1) {
+        if (jebp__read_bool(bec, update_probs[i], &err)) {
+            probs[i] = jebp__read_bec_uint(bec, 8, &err);
+        }
+    }
+    if (jebp__read_flag(bec, &err)) {
+        // TODO: support coefficient skipping
+        return jebp__error(&err, JEBP_ERROR_NOSUP);
+    }
+    return err;
+}
+
+static jebp_error_t jebp__read_bec_header(jebp__vp8_header_t *hdr,
+                                          jebp__bec_reader_t *bec) {
+    jebp_error_t err = JEBP_OK;
+    if (jebp__read_flag(bec, &err)) {
+        // pixel format must be YCbCr
+        return jebp__error(&err, JEBP_ERROR_NOSUP);
+    }
+    jebp__read_flag(bec, &err); // we always clamp pixels
+    if (err != JEBP_OK) {
+        return err;
+    }
+    if ((err = jebp__read_segment_header(hdr, bec)) != JEBP_OK) {
+        return err;
+    }
+    if ((err = jebp__read_filter_header(hdr, bec)) != JEBP_OK) {
+        return err;
+    }
+    if (jebp__read_bec_uint(bec, 2, &err) > 0 || err != JEBP_OK) {
+        // TODO: support data partitions
+        return jebp__error(&err, JEBP_ERROR_NOSUP);
+    }
+    if ((err = jebp__read_quant_header(hdr, bec)) != JEBP_OK) {
+        return err;
+    }
+    jebp__read_flag(bec, &err); // there is only one frame so probabilities are
+                                // never used for later frames
+    if (err != JEBP_OK) {
+        return err;
+    }
+    if ((err = jebp__read_token_header(hdr, bec)) != JEBP_OK) {
+        return err;
+    }
+    return JEBP_OK;
+}
+
+/**
+ * VP8 prediction
+ */
+#define JEBP__BLOCK_BITS 2
+#define JEBP__BLOCK_SIZE (1 << JEBP__BLOCK_BITS)                    // 4
+#define JEBP__NB_BLOCK_COEFFS (JEBP__BLOCK_SIZE * JEBP__BLOCK_SIZE) // 16
+#define JEBP__Y_BITS 2
+#define JEBP__Y_SIZE (1 << JEBP__Y_BITS)                     // 4
+#define JEBP__NB_Y_BLOCKS (JEBP__Y_SIZE * JEBP__Y_SIZE)      // 16
+#define JEBP__Y_PIXEL_BITS (JEBP__Y_BITS + JEBP__BLOCK_BITS) // 4
+#define JEBP__Y_PIXEL_SIZE (1 << JEBP__Y_PIXEL_BITS)         // 16
+#define JEBP__UV_BITS 1
+#define JEBP__UV_SIZE (1 << JEBP__UV_BITS)                     // 2
+#define JEBP__NB_UV_BLOCKS (JEBP__UV_SIZE * JEBP__UV_SIZE)     // 4
+#define JEBP__UV_PIXEL_BITS (JEBP__UV_BITS + JEBP__BLOCK_BITS) // 3
+#define JEBP__UV_PIXEL_SIZE (1 << JEBP__UV_PIXEL_BITS)         // 8
+
+typedef enum jebp__vp8_pred_type_t {
+    JEBP__VP8_PRED_DC, // Predict DC only
+    JEBP__VP8_PRED_V,  // Vertical
+    JEBP__VP8_PRED_H,  // Horizontal
+    JEBP__VP8_PRED_TM, // "True-Motion"
+    JEBP__VP8_PRED_B,  // Per-block prediction
+    JEBP__NB_Y_PRED_TYPES,
+    JEBP__NB_UV_PRED_TYPES = JEBP__VP8_PRED_B
+} jebp__vp8_pred_type_t;
+
+typedef enum jebp__b_pred_type_t {
+    JEBP__B_PRED_DC, // Predict DC only
+    JEBP__B_PRED_TM, // "True-motion"
+    JEBP__B_PRED_VE, // Vertical (S)
+    JEBP__B_PRED_HE, // Horizontal (E)
+    JEBP__B_PRED_LD, // Left-down (SW)
+    JEBP__B_PRED_RD, // Right-down (SE)
+    JEBP__B_PRED_VR, // Vertical-right (SSE)
+    JEBP__B_PRED_VL, // Vertical-left (SSW)
+    JEBP__B_PRED_HD, // Horizontal-down (ESE)
+    JEBP__B_PRED_HU, // Horizontal-up (ENE)
+    JEBP__NB_B_PRED_TYPES
+} jebp__b_pred_type_t;
+
+typedef void (*jebp__vp8_pred_t)(jebp_ubyte *pred, jebp_ubyte *top,
+                                 jebp_ubyte *left, jebp_int stride);
+
+static void jebp__uv_pred_fill(jebp_ubyte *pred, jebp_int stride,
+                               jebp_ubyte value) {
+    for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 1) {
+        memset(pred, value, JEBP__UV_PIXEL_SIZE);
+        pred += stride;
+    }
+}
+
+static void jebp__uv_pred_dc(jebp_ubyte *pred, jebp_ubyte *top,
+                             jebp_ubyte *left, jebp_int stride) {
+    jebp_int top_sum = 0;
+    jebp_int left_sum = 0;
+    if (top != NULL) {
+        for (jebp_int i = 0; i < JEBP__UV_PIXEL_SIZE; i += 1) {
+            top_sum += *(top++);
+        }
+    }
+    if (left != NULL) {
+        for (jebp_int i = 0; i < JEBP__UV_PIXEL_SIZE; i += 1) {
+            left_sum += *left;
+            left += stride;
+        }
+    }
+    jebp_ubyte value;
+    if (top != NULL && left != NULL) {
+        value = (top_sum + left_sum + 8) >> 4;
+    } else if (top != NULL) {
+        value = (top_sum + 4) >> 3;
+    } else if (left != NULL) {
+        value = (left_sum + 4) >> 3;
+    } else {
+        value = 128;
+    }
+    jebp__uv_pred_fill(pred, stride, value);
+}
+
+static void jebp__uv_pred_v(jebp_ubyte *pred, jebp_ubyte *top, jebp_ubyte *left,
+                            jebp_int stride) {
+    (void)left;
+    if (top == NULL) {
+        jebp__uv_pred_fill(pred, stride, 127);
+        return;
+    }
+    for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 1) {
+        memcpy(pred, top, JEBP__UV_PIXEL_SIZE);
+        pred += stride;
+    }
+}
+
+static void jebp__uv_pred_h(jebp_ubyte *pred, jebp_ubyte *top, jebp_ubyte *left,
+                            jebp_int stride) {
+    (void)top;
+    if (left == NULL) {
+        jebp__uv_pred_fill(pred, stride, 129);
+        return;
+    }
+    for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 1) {
+        memset(pred, *left, JEBP__UV_PIXEL_SIZE);
+        left += stride;
+        pred += stride;
+    }
+}
+
+static void jebp__uv_pred_tm(jebp_ubyte *pred, jebp_ubyte *top,
+                             jebp_ubyte *left, jebp_int stride) {
+    // TODO: maybe top/left should always be filled int so we don't have to
+    //       duplicate default numbers from V/H, but then how would we support
+    //       DC prediction if top/left are always non-NULL??
+    jebp_ubyte p;
+    if (top == NULL) {
+        p = 127;
+    } else if (left == NULL) {
+        p = 129;
+    } else {
+        p = top[-1];
+    }
+    for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 1) {
+        jebp_int lp;
+        if (left == NULL) {
+            lp = 129 - p;
+        } else {
+            lp = *left - p;
+            left += stride;
+        }
+        if (top == NULL) {
+            memset(pred, JEBP__CLAMP_UBYTE(lp + 127), JEBP__UV_PIXEL_SIZE);
+        } else {
+            for (jebp_int x = 0; x < JEBP__UV_PIXEL_SIZE; x += 1) {
+                pred[x] = JEBP__CLAMP_UBYTE(lp + top[x]);
+            }
+        }
+        pred += stride;
+    }
+}
+
+static void jebp__y_pred_fill(jebp_ubyte *pred, jebp_int stride,
+                              jebp_ubyte value) {
+    for (jebp_int y = 0; y < JEBP__Y_PIXEL_SIZE; y += 1) {
+        memset(pred, value, JEBP__Y_PIXEL_SIZE);
+        pred += stride;
+    }
+}
+
+static const jebp__vp8_pred_t jebp__uv_preds[JEBP__NB_UV_PRED_TYPES] = {
+    jebp__uv_pred_dc, jebp__uv_pred_v, jebp__uv_pred_h, jebp__uv_pred_tm};
+
+/**
+ * DCT and WHT inversions
+ */
+// Utility macros that does 16-bit fixed-point multiplications
+// Multiplies against cos(pi/8)*sqrt(2)
+#define JEBP__DCT_COS(x) ((x) + (((x)*20091) >> 16))
+// Multiplies against cos(pi/8)*sqrt(2)
+#define JEBP__DCT_SIN(x) (((x)*35468) >> 16)
+
+static void jebp__invert_dct(jebp_short *dct) {
+    jebp_short *ptr = dct;
+    for (jebp_int i = 0; i < JEBP__BLOCK_SIZE; i += 1) {
+        jebp_int t0 = ptr[0] + ptr[8];
+        jebp_int t1 = ptr[0] - ptr[8];
+        jebp_int t2 = JEBP__DCT_SIN(ptr[4]) - JEBP__DCT_COS(ptr[12]);
+        jebp_int t3 = JEBP__DCT_COS(ptr[4]) + JEBP__DCT_SIN(ptr[12]);
+        ptr[0] = t0 + t3;
+        ptr[4] = t0 - t3;
+        ptr[8] = t1 + t2;
+        ptr[12] = t1 - t2;
+        ptr += 1;
+    }
+
+    ptr = dct;
+    for (jebp_int i = 0; i < JEBP__BLOCK_SIZE; i += 1) {
+        jebp_int t0 = ptr[0] + ptr[2];
+        jebp_int t1 = ptr[0] - ptr[2];
+        jebp_int t2 = JEBP__DCT_SIN(ptr[1]) - JEBP__DCT_COS(ptr[3]);
+        jebp_int t3 = JEBP__DCT_COS(ptr[1]) + JEBP__DCT_SIN(ptr[3]);
+        ptr[0] = (t0 + t3 + 4) >> 3;
+        ptr[1] = (t0 - t3 + 4) >> 3;
+        ptr[2] = (t1 + t2 + 4) >> 3;
+        ptr[3] = (t1 - t2 + 4) >> 3;
+        ptr += JEBP__BLOCK_SIZE;
+    }
+}
+
+static void jebp__invert_wht(jebp_short *wht) {
+    jebp_short *ptr = wht;
+    for (jebp_int i = 0; i < JEBP__BLOCK_SIZE; i += 1) {
+        jebp_int t0 = ptr[0] + ptr[12];
+        jebp_int t1 = ptr[4] + ptr[8];
+        jebp_int t2 = ptr[4] - ptr[8];
+        jebp_int t3 = ptr[0] - ptr[12];
+        ptr[0] = t0 + t1;
+        ptr[4] = t2 + t3;
+        ptr[8] = t0 - t1;
+        ptr[12] = t3 - t2;
+        ptr += 1;
+    }
+
+    ptr = wht;
+    for (jebp_int i = 0; i < JEBP__BLOCK_SIZE; i += 1) {
+        jebp_int t0 = ptr[0] + ptr[3];
+        jebp_int t1 = ptr[1] + ptr[2];
+        jebp_int t2 = ptr[1] - ptr[2];
+        jebp_int t3 = ptr[0] - ptr[3];
+        ptr[0] = (t0 + t1 + 3) >> 3;
+        ptr[1] = (t2 + t3 + 3) >> 3;
+        ptr[2] = (t0 - t1 + 3) >> 3;
+        ptr[3] = (t3 - t2 + 3) >> 3;
+        ptr += JEBP__BLOCK_SIZE;
+    }
+}
+
+/**
+ * Macroblock header
+ */
+typedef enum jebp__y_flags_t {
+    JEBP__B_PRED_MASK = 0x7f,
+    JEBP__Y_NONZERO = 0x80
+} jebp__y_flags_t;
+
+typedef enum jebp__uv_flags_t {
+    JEBP__U_NONZERO = 0x01,
+    JEBP__V_NONZERO = 0x02
+} jebp__uv_flags_t;
+
+typedef struct jebp__macro_state_t {
+    jebp_ubyte y_flags[JEBP__Y_SIZE];   // jebp__y_flags_t | jebp__b_pred_type_t
+    jebp_ubyte uv_flags[JEBP__UV_SIZE]; // jebp__uv_flags_t
+    jebp_ubyte y2_flags;                // jebp__y_flags_t
+} jebp__macro_state_t;
+
+typedef struct jebp__macro_state_pair_t {
+    jebp__macro_state_t *top;
+    jebp__macro_state_t *left;
+} jebp__macro_state_pair_t;
+
+typedef struct jebp__macro_header_t {
+    jebp__vp8_header_t *vp8;
+    jebp_int x;
+    jebp_int y;
+    jebp__segment_t *segment;
+    jebp__vp8_pred_type_t y_pred;
+    jebp__vp8_pred_type_t uv_pred;
+    jebp__b_pred_type_t b_preds[JEBP__NB_Y_BLOCKS];
+} jebp__macro_header_t;
+
+static const jebp_byte jebp__segment_tree[JEBP__NB_TREE(JEBP__NB_SEGMENTS)];
+static const jebp_byte jebp__y_pred_tree[JEBP__NB_TREE(JEBP__NB_Y_PRED_TYPES)];
+static const jebp_ubyte
+    jebp__y_pred_probs[JEBP__NB_PROBS(JEBP__NB_Y_PRED_TYPES)];
+static const jebp_byte jebp__b_pred_tree[JEBP__NB_TREE(JEBP__NB_B_PRED_TYPES)];
+static const jebp_ubyte
+    jebp__b_pred_probs[JEBP__NB_B_PRED_TYPES][JEBP__NB_B_PRED_TYPES]
+                      [JEBP__NB_PROBS(JEBP__NB_B_PRED_TYPES)];
+static const jebp_byte
+    jebp__uv_pred_tree[JEBP__NB_TREE(JEBP__NB_UV_PRED_TYPES)];
+static const jebp_ubyte
+    jebp__uv_pred_probs[JEBP__NB_PROBS(JEBP__NB_UV_PRED_TYPES)];
+static const jebp__b_pred_type_t jebp__uv_pred_b_type[JEBP__NB_UV_PRED_TYPES];
+
+static jebp_error_t jebp__read_macro_header(jebp__macro_header_t *hdr,
+                                            jebp__macro_state_pair_t state,
+                                            jebp__bec_reader_t *bec) {
+    jebp_error_t err = JEBP_OK;
+    jebp_int segment = 0;
+    if (hdr->vp8->segment_type == JEBP__SEGMENT_ID) {
+        segment = jebp__read_tree(bec, jebp__segment_tree,
+                                  hdr->vp8->segment_probs, &err);
+    }
+    hdr->segment = &hdr->vp8->segments[segment];
+
+    hdr->y_pred =
+        jebp__read_tree(bec, jebp__y_pred_tree, jebp__y_pred_probs, &err);
+    jebp__b_pred_type_t b_top[JEBP__Y_SIZE];
+    jebp__b_pred_type_t b_left[JEBP__Y_SIZE];
+    for (jebp_int i = 0; i < JEBP__Y_SIZE; i += 1) {
+        if (hdr->y_pred == JEBP__VP8_PRED_B) {
+            // We read out the previous subblock predictions from the state now
+            // to both make the code cleaner and to potentially improve
+            // performance (rather than reading & writing the state for every
+            // subblock)
+            b_top[i] = state.top->y_flags[i] & JEBP__B_PRED_MASK;
+            b_left[i] = state.left->y_flags[i] & JEBP__B_PRED_MASK;
+        } else {
+            // If we're not decoding B prediction subblocks we instead use this
+            // iteration to copy over the fake subblock modes used for the
+            // probabilities which will be written back to the state at the end
+            b_top[i] = jebp__uv_pred_b_type[hdr->y_pred];
+            b_left[i] = jebp__uv_pred_b_type[hdr->y_pred];
+        }
+    }
+
+    if (hdr->y_pred == JEBP__VP8_PRED_B) {
+        for (jebp_int i = 0; i < JEBP__NB_Y_BLOCKS; i += 1) {
+            jebp_int x = i % JEBP__Y_SIZE;
+            jebp_int y = i / JEBP__Y_SIZE;
+            hdr->b_preds[i] =
+                jebp__read_tree(bec, jebp__b_pred_tree,
+                                jebp__b_pred_probs[b_top[x]][b_left[y]], &err);
+            b_top[x] = hdr->b_preds[i];
+            b_left[y] = hdr->b_preds[i];
+        }
+    }
+
+    for (jebp_int i = 0; i < JEBP__Y_SIZE; i += 1) {
+        JEBP__SET_MASK(state.top->y_flags[i], JEBP__B_PRED_MASK, b_top[i]);
+        JEBP__SET_MASK(state.left->y_flags[i], JEBP__B_PRED_MASK, b_left[i]);
+    }
+    hdr->uv_pred =
+        jebp__read_tree(bec, jebp__uv_pred_tree, jebp__uv_pred_probs, &err);
+    return err;
+}
+
+/**
+ * Macroblock data
+ */
+#define JEBP__MAX_TOKEN_EXTRA 11
+
+typedef struct jebp__token_extra_t {
+    jebp_byte offset;
+    jebp_ubyte probs[JEBP__MAX_TOKEN_EXTRA + 1];
+} jebp__token_extra_t;
+
+static const jebp_byte jebp__coeff_bands[JEBP__NB_BLOCK_COEFFS];
+static const jebp_byte jebp__coeff_order[JEBP__NB_BLOCK_COEFFS];
+static const jebp_byte jebp__token_tree[JEBP__NB_TREE(JEBP__NB_TOKENS - 1)];
+static const jebp__token_extra_t jebp__token_extra[JEBP__NB_EXTRA_TOKENS];
+
+JEBP__INLINE jebp_short jebp__read_token_extrabits(jebp__token_t token,
+                                                   jebp__bec_reader_t *bec,
+                                                   jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+    const jebp__token_extra_t *extra =
+        &jebp__token_extra[token - JEBP__TOKEN_EXTRA1];
+    jebp_short value = 0;
+    for (const jebp_ubyte *prob = extra->probs; *prob != 0; prob += 1) {
+        value = (value << 1) | jebp__read_bool(bec, *prob, err);
+    }
+    return value + extra->offset;
+}
+
+// Returns non-zero if it contains atleast 1 non-zero token
+static jebp_int jebp__read_dct(jebp__macro_header_t *hdr, jebp_short *dct,
+                               jebp__block_type_t type, jebp_int complex,
+                               jebp__bec_reader_t *bec, jebp_error_t *err) {
+    if (*err != JEBP_OK) {
+        return 0;
+    }
+    jebp_int coeff = type == JEBP__BLOCK_Y1 ? 1 : 0;
+    jebp__quants_t *quants = &hdr->segment->quants;
+    // We can treat the quants structure as an array of shorts
+    // TODO: maybe it should be an array of shorts??
+    jebp_short *dcac;
+    switch (type) {
+    case JEBP__BLOCK_Y2:
+        dcac = (jebp_short *)&quants->y2_dc;
+        break;
+    case JEBP__BLOCK_UV:
+        dcac = (jebp_short *)&quants->uv_dc;
+        break;
+    default:
+        dcac = (jebp_short *)&quants->y_dc;
+        break;
+    }
+    // The initial quantizer is DC if starting at 0, or AC for Y1 blocks
+    jebp_short quant = dcac[coeff];
+
+    jebp_ubyte(*token_probs)[JEBP__NB_TOKEN_COMPLEXITIES]
+                            [JEBP__NB_PROBS(JEBP__NB_TOKENS)] =
+                                hdr->vp8->token_probs[type];
+    jebp_ubyte *probs = token_probs[jebp__coeff_bands[coeff]][complex];
+    if (!jebp__read_bool(bec, probs[0], err)) {
+        // First token is EOB
+        JEBP__CLEAR(dct, JEBP__NB_BLOCK_COEFFS * sizeof(jebp_short));
+        return 0;
+    }
+
+    for (;;) {
+        jebp__token_t token =
+            jebp__read_tree(bec, jebp__token_tree, &probs[1], err);
+        if (token == JEBP__TOKEN_COEFF0) {
+            // If the token is 0, there is no negative flag, the next complexity
+            // is 0, and we skip the EOB reading.
+            dct[jebp__coeff_order[coeff]] = 0;
+            coeff += 1;
+            if (coeff >= JEBP__NB_BLOCK_COEFFS) {
+                break;
+            }
+            quant = dcac[1];
+            probs = token_probs[jebp__coeff_bands[coeff]][0];
+        } else {
+            jebp_short value;
+            complex = 2;
+            if (token == JEBP__TOKEN_COEFF1) {
+                // 1 has a complexity of 1
+                value = 1;
+                complex = 1;
+            } else if (token < JEBP__TOKEN_EXTRA1) {
+                value = token - JEBP__TOKEN_COEFF0;
+            } else {
+                value = jebp__read_token_extrabits(token, bec, err);
+            }
+            if (jebp__read_flag(bec, err)) {
+                // Negative value
+                value = -value;
+            }
+            value *= quant;
+            dct[jebp__coeff_order[coeff]] = value;
+
+            coeff += 1;
+            if (coeff >= JEBP__NB_BLOCK_COEFFS) {
+                break;
+            }
+            quant = dcac[1];
+            probs = token_probs[jebp__coeff_bands[coeff]][complex];
+            if (!jebp__read_bool(bec, probs[0], err)) {
+                // EOB token
+                break;
+            }
+        }
+    }
+
+    // Fill the rest after an EOB with 0
+    for (; coeff < JEBP__NB_BLOCK_COEFFS; coeff += 1) {
+        dct[jebp__coeff_order[coeff]] = 0;
+    }
+    return 1;
+}
+
+// TODO: maybe these should be macros??
+JEBP__INLINE jebp_int jebp__get_y_nonzero(jebp__macro_state_t *state,
+                                          jebp_int index) {
+    return (state->y_flags[index] & JEBP__Y_NONZERO) != 0;
+}
+
+JEBP__INLINE jebp_int jebp__get_u_nonzero(jebp__macro_state_t *state,
+                                          jebp_int index) {
+    return (state->uv_flags[index] & JEBP__U_NONZERO) != 0;
+}
+
+JEBP__INLINE jebp_int jebp__get_v_nonzero(jebp__macro_state_t *state,
+                                          jebp_int index) {
+    return (state->uv_flags[index] & JEBP__V_NONZERO) != 0;
+}
+
+JEBP__INLINE jebp_int jebp__get_y2_nonzero(jebp__macro_state_t *state) {
+    return (state->y2_flags & JEBP__Y_NONZERO) != 0;
+}
+
+static void jebp__sum_pred_dct(jebp_ubyte *pred, jebp_int stride,
+                               jebp_short *dct) {
+    for (jebp_int i = 0; i < JEBP__BLOCK_SIZE; i += 1) {
+        pred[0] = JEBP__CLAMP_UBYTE(pred[0] + dct[0]);
+        pred[1] = JEBP__CLAMP_UBYTE(pred[1] + dct[1]);
+        pred[2] = JEBP__CLAMP_UBYTE(pred[2] + dct[2]);
+        pred[3] = JEBP__CLAMP_UBYTE(pred[3] + dct[3]);
+        pred += stride;
+        dct += JEBP__BLOCK_SIZE;
+    }
+}
+
+static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
+                                          jebp__macro_state_pair_t state,
+                                          jebp__yuv_image_t *image,
+                                          jebp__bec_reader_t *bec) {
+    jebp_error_t err = JEBP_OK;
+    jebp_short dct[JEBP__NB_BLOCK_COEFFS];
+    jebp_short wht[JEBP__NB_BLOCK_COEFFS];
+    jebp__block_type_t y_type = JEBP__BLOCK_Y0;
+    if (hdr->y_pred != JEBP__VP8_PRED_B) {
+        y_type = JEBP__BLOCK_Y1;
+        jebp_int complex =
+            jebp__get_y2_nonzero(state.top) + jebp__get_y2_nonzero(state.left);
+        jebp_int nonzero =
+            jebp__read_dct(hdr, wht, JEBP__BLOCK_Y2, complex, bec, &err);
+        JEBP__SET_BIT(state.top->y2_flags, JEBP__Y_NONZERO, nonzero);
+        JEBP__SET_BIT(state.left->y2_flags, JEBP__Y_NONZERO, nonzero);
+        jebp__invert_wht(wht);
+    }
+
+    // TODO: implement proper Y prediction
+    jebp__y_pred_fill(&image->y[hdr->y * image->width + hdr->x], image->width,
+                      128);
+
+    for (jebp_int i = 0; i < JEBP__NB_Y_BLOCKS; i += 1) {
+        jebp_int x = i % JEBP__Y_SIZE;
+        jebp_int y = i / JEBP__Y_SIZE;
+        jebp_int image_x = hdr->x + x * JEBP__BLOCK_SIZE;
+        jebp_int image_y = hdr->y + y * JEBP__BLOCK_SIZE;
+        jebp_ubyte *pred = &image->y[image_y * image->width + image_x];
+
+        jebp_int complex = jebp__get_y_nonzero(state.top, x) +
+                           jebp__get_y_nonzero(state.left, y);
+        jebp_int nonzero = jebp__read_dct(hdr, dct, y_type, complex, bec, &err);
+        JEBP__SET_BIT(state.top->y_flags[x], JEBP__Y_NONZERO, nonzero);
+        JEBP__SET_BIT(state.left->y_flags[y], JEBP__Y_NONZERO, nonzero);
+
+        if (y_type == JEBP__BLOCK_Y1) {
+            dct[0] = wht[i];
+        }
+        jebp__invert_dct(dct);
+        jebp__sum_pred_dct(pred, image->width, dct);
+    }
+
+    jebp_int uv_offset = (hdr->y / 2) * image->uv_width + (hdr->x / 2);
+    jebp_ubyte *u_top = NULL;
+    jebp_ubyte *v_top = NULL;
+    if (hdr->y > 0) {
+        u_top = &image->u[uv_offset - image->uv_width];
+        v_top = &image->v[uv_offset - image->uv_width];
+    }
+    jebp_ubyte *u_left = NULL;
+    jebp_ubyte *v_left = NULL;
+    if (hdr->x > 0) {
+        u_left = &image->u[uv_offset - 1];
+        v_left = &image->v[uv_offset - 1];
+    }
+    jebp__vp8_pred_t uv_pred = jebp__uv_preds[hdr->uv_pred];
+    uv_pred(&image->u[uv_offset], u_top, u_left, image->uv_width);
+    uv_pred(&image->v[uv_offset], v_top, v_left, image->uv_width);
+
+    for (jebp_int i = 0; i < JEBP__NB_UV_BLOCKS; i += 1) {
+        jebp_int x = i % JEBP__UV_SIZE;
+        jebp_int y = i / JEBP__UV_SIZE;
+        jebp_int image_x = hdr->x / 2 + x * JEBP__BLOCK_SIZE;
+        jebp_int image_y = hdr->y / 2 + y * JEBP__BLOCK_SIZE;
+        jebp_ubyte *pred = &image->u[image_y * image->uv_width + image_x];
+
+        jebp_int complex = jebp__get_u_nonzero(state.top, x) +
+                           jebp__get_u_nonzero(state.left, y);
+        jebp_int nonzero =
+            jebp__read_dct(hdr, dct, JEBP__BLOCK_UV, complex, bec, &err);
+        JEBP__SET_BIT(state.top->uv_flags[x], JEBP__U_NONZERO, nonzero);
+        JEBP__SET_BIT(state.left->uv_flags[y], JEBP__U_NONZERO, nonzero);
+        jebp__invert_dct(dct);
+        jebp__sum_pred_dct(pred, image->uv_width, dct);
+    }
+    for (jebp_int i = 0; i < JEBP__NB_UV_BLOCKS; i += 1) {
+        jebp_int x = i % JEBP__UV_SIZE;
+        jebp_int y = i / JEBP__UV_SIZE;
+        jebp_int image_x = hdr->x / 2 + x * JEBP__BLOCK_SIZE;
+        jebp_int image_y = hdr->y / 2 + y * JEBP__BLOCK_SIZE;
+        jebp_ubyte *pred = &image->v[image_y * image->uv_width + image_x];
+
+        jebp_int complex = jebp__get_v_nonzero(state.top, x) +
+                           jebp__get_v_nonzero(state.left, y);
+        jebp_int nonzero =
+            jebp__read_dct(hdr, dct, JEBP__BLOCK_UV, complex, bec, &err);
+        JEBP__SET_BIT(state.top->uv_flags[x], JEBP__V_NONZERO, nonzero);
+        JEBP__SET_BIT(state.left->uv_flags[y], JEBP__V_NONZERO, nonzero);
+        jebp__invert_dct(dct);
+        jebp__sum_pred_dct(pred, image->uv_width, dct);
+    }
+    return err;
+}
+
+/**
+ * VP8 lossy codec
+ */
+#define JEBP__VP8_TAG 0x20385056
+#define JEBP__VP8_MAGIC 0x2a019d
+
+static jebp_error_t jebp__read_vp8_header(jebp__vp8_header_t *hdr,
+                                          jebp_image_t *image,
+                                          jebp__reader_t *reader,
+                                          jebp__chunk_t *chunk) {
+    jebp_error_t err = JEBP_OK;
+    if (chunk->size < 10) {
+        return JEBP_ERROR_INVDATA_HEADER;
+    }
+    chunk->size -= 10;
+    jebp_int frame = jebp__read_uint24(reader, &err);
+    if (jebp__read_uint24(reader, &err) != JEBP__VP8_MAGIC) {
+        // check magic before everything else, despite being 3 bytes in
+        return jebp__error(&err, JEBP_ERROR_INVDATA_HEADER);
+    }
+    if (frame & 0x1) {
+        // frame must be a key-frame
+        return jebp__error(&err, JEBP_ERROR_INVDATA);
+    }
+    if ((frame & 0xe) > 6) {
+        // version must be 3 or less (shifted left by 1)
+        return jebp__error(&err, JEBP_ERROR_NOSUP);
+    }
+    if (!(frame & 0x10)) {
+        // frame must be displayed
+        return jebp__error(&err, JEBP_ERROR_INVDATA);
+    }
+    hdr->bec_size = frame >> 5;
+    if ((jebp_uint)hdr->bec_size > chunk->size) {
+        return jebp__error(&err, JEBP_ERROR_INVDATA);
+    }
+    chunk->size -= hdr->bec_size;
+    image->width = jebp__read_uint16(reader, &err);
+    image->height = jebp__read_uint16(reader, &err);
+    if ((image->width & 0xc000) || (image->height & 0xc000)) {
+        // TODO: support frame upscaling
+        return jebp__error(&err, JEBP_ERROR_NOSUP);
+    }
+    return err;
+}
+
+static jebp_error_t jebp__read_vp8_size(jebp_image_t *image,
+                                        jebp__reader_t *reader,
+                                        jebp__chunk_t *chunk) {
+    jebp__vp8_header_t hdr;
+    jebp__init_vp8_header(&hdr);
+    return jebp__read_vp8_header(&hdr, image, reader, chunk);
+}
+
+static jebp_error_t jebp__read_vp8(jebp_image_t *image, jebp__reader_t *reader,
+                                   jebp__chunk_t *chunk) {
+    jebp_error_t err;
+    jebp__vp8_header_t hdr;
+    jebp__init_vp8_header(&hdr);
+    if ((err = jebp__read_vp8_header(&hdr, image, reader, chunk)) != JEBP_OK) {
+        return err;
+    }
+
+    jebp__reader_t map;
+    jebp__bec_reader_t hdr_bec;
+    if ((err = jebp__map_reader(reader, &map, hdr.bec_size)) != JEBP_OK) {
+        return err;
+    }
+    if ((err = jebp__init_bec_reader(&hdr_bec, &map, hdr.bec_size)) !=
+        JEBP_OK) {
+        jebp__unmap_reader(&map);
+        return err;
+    }
+    if ((err = jebp__read_bec_header(&hdr, &hdr_bec)) != JEBP_OK) {
+        jebp__unmap_reader(&map);
+        return err;
+    }
+    jebp__bec_reader_t data_bec;
+    if ((err = jebp__init_bec_reader(&data_bec, reader, chunk->size)) !=
+        JEBP_OK) {
+        jebp__unmap_reader(&map);
+        return err;
+    }
+
+    jebp_int macro_width = JEBP__CEIL_SHIFT(image->width, JEBP__Y_PIXEL_BITS);
+    jebp_int macro_height = JEBP__CEIL_SHIFT(image->height, JEBP__Y_PIXEL_BITS);
+    jebp__yuv_image_t yuv_image;
+    yuv_image.width = macro_width * JEBP__Y_PIXEL_SIZE;
+    yuv_image.height = macro_height * JEBP__Y_PIXEL_SIZE;
+    if ((err = jebp__alloc_yuv_image(&yuv_image)) != JEBP_OK) {
+        jebp__unmap_reader(&map);
+        return err;
+    }
+
+    size_t top_size = macro_width * sizeof(jebp__macro_state_t);
+    jebp__macro_state_t *top = JEBP_ALLOC(top_size);
+    if (top == NULL) {
+        jebp__unmap_reader(&map);
+        return JEBP_ERROR_NOMEM;
+    }
+    JEBP__CLEAR(top, top_size);
+    jebp__macro_state_t left;
+    jebp__macro_header_t macro_hdr;
+    macro_hdr.vp8 = &hdr;
+
+    for (jebp_int y = 0; y < macro_height; y += 1) {
+        JEBP__CLEAR(&left, sizeof(jebp__macro_state_t));
+        macro_hdr.y = y * JEBP__Y_PIXEL_SIZE;
+        for (jebp_int x = 0; x < macro_width; x += 1) {
+            macro_hdr.x = x * JEBP__Y_PIXEL_SIZE;
+            jebp__macro_state_pair_t state = {.top = &top[x], .left = &left};
+            if ((err = jebp__read_macro_header(&macro_hdr, state, &hdr_bec)) !=
+                JEBP_OK) {
+                break;
+            }
+
+            if ((err = jebp__read_macro_data(&macro_hdr, state, &yuv_image,
+                                             &data_bec)) != JEBP_OK) {
+                break;
+            }
+        }
+        if (err != JEBP_OK) {
+            break;
+        }
+    }
+
+    JEBP_FREE(top);
+    jebp__unmap_reader(&map);
+    if (err != JEBP_OK) {
+        jebp__free_yuv_image(&yuv_image);
+        return err;
+    }
+
+    if ((err = jebp__alloc_image(image)) != JEBP_OK) {
+        jebp__free_yuv_image(&yuv_image);
+        return err;
+    }
+    err = jebp__convert_yuv_image(image, &yuv_image);
+    jebp__free_yuv_image(&yuv_image);
+    if (err != JEBP_OK) {
+        jebp_free_image(image);
+        return err;
+    }
+    return JEBP_OK;
+}
+#endif // JEBP_NO_VP8
 
 /**
  * Bit reader
@@ -2330,6 +3624,10 @@ static jebp_error_t jebp__read_size(jebp_image_t *image,
     }
 
     switch (chunk.tag) {
+#ifndef JEBP_NO_VP8
+    case JEBP__VP8_TAG:
+        return jebp__read_vp8_size(image, reader, &chunk);
+#endif // JEBP_NO_VP8
 #ifndef JEBP_NO_VP8L
     case JEBP__VP8L_TAG:
         return jebp__read_vp8l_size(image, reader, &chunk);
@@ -2362,6 +3660,10 @@ static jebp_error_t jebp__read(jebp_image_t *image, jebp__reader_t *reader) {
     }
 
     switch (chunk.tag) {
+#ifndef JEBP_NO_VP8
+    case JEBP__VP8_TAG:
+        return jebp__read_vp8(image, reader, &chunk);
+#endif // JEBP_NO_VP8
 #ifndef JEBP_NO_VP8L
     case JEBP__VP8L_TAG:
         return jebp__read_vp8l(image, reader, &chunk);
@@ -2417,6 +3719,443 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path) {
 // putting them in the middle of the code would disrupt the flow of reading.
 // Especially since in most situations the values in these tables are
 // unimportant to the developer.
+
+#ifndef JEBP_NO_VP8
+// Lookup table mapping quantizer indices to DC values
+static const jebp_short jebp__dc_quant_table[JEBP__NB_QUANT_INDEXES] = {
+    4,   5,   6,   7,   8,   9,   10,  10,  11,  12,  13,  14,  15,  16,  17,
+    17,  18,  19,  20,  20,  21,  21,  22,  22,  23,  23,  24,  25,  25,  26,
+    27,  28,  29,  30,  31,  32,  33,  34,  35,  36,  37,  37,  38,  39,  40,
+    41,  42,  43,  44,  45,  46,  46,  47,  48,  49,  50,  51,  52,  53,  54,
+    55,  56,  57,  58,  59,  60,  61,  62,  63,  64,  65,  66,  67,  68,  69,
+    70,  71,  72,  73,  74,  75,  76,  76,  77,  78,  79,  80,  81,  82,  83,
+    84,  85,  86,  87,  88,  89,  91,  93,  95,  96,  98,  100, 101, 102, 104,
+    106, 108, 110, 112, 114, 116, 118, 122, 124, 126, 128, 130, 132, 134, 136,
+    138, 140, 143, 145, 148, 151, 154, 157};
+
+// Lookup table mapping quantizer indices to AC values
+static const jebp_short jebp__ac_quant_table[JEBP__NB_QUANT_INDEXES] = {
+    4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  16,  17,  18,
+    19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,  33,
+    34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,
+    49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  60,  62,  64,  66,  68,
+    70,  72,  74,  76,  78,  80,  82,  84,  86,  88,  90,  92,  94,  96,  98,
+    100, 102, 104, 106, 108, 110, 112, 114, 116, 119, 122, 125, 128, 131, 134,
+    137, 140, 143, 146, 149, 152, 155, 158, 161, 164, 167, 170, 173, 177, 181,
+    185, 189, 193, 197, 201, 205, 209, 213, 217, 221, 225, 229, 234, 239, 245,
+    249, 254, 259, 264, 269, 274, 279, 284};
+
+// Default token probabilities
+static const jebp_ubyte jebp__default_token_probs
+    [JEBP__NB_BLOCK_TYPES][JEBP__NB_COEFF_BANDS][JEBP__NB_TOKEN_COMPLEXITIES]
+    [JEBP__NB_PROBS(JEBP__NB_TOKENS)] = {
+        {{{128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128},
+          {128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128},
+          {128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128}},
+         {{253, 136, 254, 255, 228, 219, 128, 128, 128, 128, 128},
+          {189, 129, 242, 255, 227, 213, 255, 219, 128, 128, 128},
+          {106, 126, 227, 252, 214, 209, 255, 255, 128, 128, 128}},
+         {{1, 98, 248, 255, 236, 226, 255, 255, 128, 128, 128},
+          {181, 133, 238, 254, 221, 234, 255, 154, 128, 128, 128},
+          {78, 134, 202, 247, 198, 180, 255, 219, 128, 128, 128}},
+         {{1, 185, 249, 255, 243, 255, 128, 128, 128, 128, 128},
+          {184, 150, 247, 255, 236, 224, 128, 128, 128, 128, 128},
+          {77, 110, 216, 255, 236, 230, 128, 128, 128, 128, 128}},
+         {{1, 101, 251, 255, 241, 255, 128, 128, 128, 128, 128},
+          {170, 139, 241, 252, 236, 209, 255, 255, 128, 128, 128},
+          {37, 116, 196, 243, 228, 255, 255, 255, 128, 128, 128}},
+         {{1, 204, 254, 255, 245, 255, 128, 128, 128, 128, 128},
+          {207, 160, 250, 255, 238, 128, 128, 128, 128, 128, 128},
+          {102, 103, 231, 255, 211, 171, 128, 128, 128, 128, 128}},
+         {{1, 152, 252, 255, 240, 255, 128, 128, 128, 128, 128},
+          {177, 135, 243, 255, 234, 225, 128, 128, 128, 128, 128},
+          {80, 129, 211, 255, 194, 224, 128, 128, 128, 128, 128}},
+         {{1, 1, 255, 128, 128, 128, 128, 128, 128, 128, 128},
+          {246, 1, 255, 128, 128, 128, 128, 128, 128, 128, 128},
+          {255, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128}}},
+        {{{198, 35, 237, 223, 193, 187, 162, 160, 145, 155, 62},
+          {131, 45, 198, 221, 172, 176, 220, 157, 252, 221, 1},
+          {68, 47, 146, 208, 149, 167, 221, 162, 255, 223, 128}},
+         {{1, 149, 241, 255, 221, 224, 255, 255, 128, 128, 128},
+          {184, 141, 234, 253, 222, 220, 255, 199, 128, 128, 128},
+          {81, 99, 181, 242, 176, 190, 249, 202, 255, 255, 128}},
+         {{1, 129, 232, 253, 214, 197, 242, 196, 255, 255, 128},
+          {99, 121, 210, 250, 201, 198, 255, 202, 128, 128, 128},
+          {23, 91, 163, 242, 170, 187, 247, 210, 255, 255, 128}},
+         {{1, 200, 246, 255, 234, 255, 128, 128, 128, 128, 128},
+          {109, 178, 241, 255, 231, 245, 255, 255, 128, 128, 128},
+          {44, 130, 201, 253, 205, 192, 255, 255, 128, 128, 128}},
+         {{1, 132, 239, 251, 219, 209, 255, 165, 128, 128, 128},
+          {94, 136, 225, 251, 218, 190, 255, 255, 128, 128, 128},
+          {22, 100, 174, 245, 186, 161, 255, 199, 128, 128, 128}},
+         {{1, 182, 249, 255, 232, 235, 128, 128, 128, 128, 128},
+          {124, 143, 241, 255, 227, 234, 128, 128, 128, 128, 128},
+          {35, 77, 181, 251, 193, 211, 255, 205, 128, 128, 128}},
+         {{1, 157, 247, 255, 236, 231, 255, 255, 128, 128, 128},
+          {121, 141, 235, 255, 225, 227, 255, 255, 128, 128, 128},
+          {45, 99, 188, 251, 195, 217, 255, 224, 128, 128, 128}},
+         {{1, 1, 251, 255, 213, 255, 128, 128, 128, 128, 128},
+          {203, 1, 248, 255, 255, 128, 128, 128, 128, 128, 128},
+          {137, 1, 177, 255, 224, 255, 128, 128, 128, 128, 128}}},
+        {{{253, 9, 248, 251, 207, 208, 255, 192, 128, 128, 128},
+          {175, 13, 224, 243, 193, 185, 249, 198, 255, 255, 128},
+          {73, 17, 171, 221, 161, 179, 236, 167, 255, 234, 128}},
+         {{1, 95, 247, 253, 212, 183, 255, 255, 128, 128, 128},
+          {239, 90, 244, 250, 211, 209, 255, 255, 128, 128, 128},
+          {155, 77, 195, 248, 188, 195, 255, 255, 128, 128, 128}},
+         {{1, 24, 239, 251, 218, 219, 255, 205, 128, 128, 128},
+          {201, 51, 219, 255, 196, 186, 128, 128, 128, 128, 128},
+          {69, 46, 190, 239, 201, 218, 255, 228, 128, 128, 128}},
+         {{1, 191, 251, 255, 255, 128, 128, 128, 128, 128, 128},
+          {223, 165, 249, 255, 213, 255, 128, 128, 128, 128, 128},
+          {141, 124, 248, 255, 255, 128, 128, 128, 128, 128, 128}},
+         {{1, 16, 248, 255, 255, 128, 128, 128, 128, 128, 128},
+          {190, 36, 230, 255, 236, 255, 128, 128, 128, 128, 128},
+          {149, 1, 255, 128, 128, 128, 128, 128, 128, 128, 128}},
+         {{1, 226, 255, 128, 128, 128, 128, 128, 128, 128, 128},
+          {247, 192, 255, 128, 128, 128, 128, 128, 128, 128, 128},
+          {240, 128, 255, 128, 128, 128, 128, 128, 128, 128, 128}},
+         {{1, 134, 252, 255, 255, 128, 128, 128, 128, 128, 128},
+          {213, 62, 250, 255, 255, 128, 128, 128, 128, 128, 128},
+          {55, 93, 255, 128, 128, 128, 128, 128, 128, 128, 128}},
+         {{128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128},
+          {128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128},
+          {128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128}}},
+        {{{202, 24, 213, 235, 186, 191, 220, 160, 240, 175, 255},
+          {126, 38, 182, 232, 169, 184, 228, 174, 255, 187, 128},
+          {61, 46, 138, 219, 151, 178, 240, 170, 255, 216, 128}},
+         {{1, 112, 230, 250, 199, 191, 247, 159, 255, 255, 128},
+          {166, 109, 228, 252, 211, 215, 255, 174, 128, 128, 128},
+          {39, 77, 162, 232, 172, 180, 245, 178, 255, 255, 128}},
+         {{1, 52, 220, 246, 198, 199, 249, 220, 255, 255, 128},
+          {124, 74, 191, 243, 183, 193, 250, 221, 255, 255, 128},
+          {24, 71, 130, 219, 154, 170, 243, 182, 255, 255, 128}},
+         {{1, 182, 225, 249, 219, 240, 255, 224, 128, 128, 128},
+          {149, 150, 226, 252, 216, 205, 255, 171, 128, 128, 128},
+          {28, 108, 170, 242, 183, 194, 254, 223, 255, 255, 128}},
+         {{1, 81, 230, 252, 204, 203, 255, 192, 128, 128, 128},
+          {123, 102, 209, 247, 188, 196, 255, 233, 128, 128, 128},
+          {20, 95, 153, 243, 164, 173, 255, 203, 128, 128, 128}},
+         {{1, 222, 248, 255, 216, 213, 128, 128, 128, 128, 128},
+          {168, 175, 246, 252, 235, 205, 255, 255, 128, 128, 128},
+          {47, 116, 215, 255, 211, 212, 255, 255, 128, 128, 128}},
+         {{1, 121, 236, 253, 212, 214, 255, 255, 128, 128, 128},
+          {141, 84, 213, 252, 201, 202, 255, 219, 128, 128, 128},
+          {42, 80, 160, 240, 162, 185, 255, 205, 128, 128, 128}},
+         {{1, 1, 255, 128, 128, 128, 128, 128, 128, 128, 128},
+          {244, 1, 255, 128, 128, 128, 128, 128, 128, 128, 128},
+          {238, 1, 255, 128, 128, 128, 128, 128, 128, 128, 128}}}};
+
+// Probabilities to update specific token
+static const jebp_ubyte jebp__update_token_probs
+    [JEBP__NB_BLOCK_TYPES][JEBP__NB_COEFF_BANDS][JEBP__NB_TOKEN_COMPLEXITIES]
+    [JEBP__NB_PROBS(JEBP__NB_TOKENS)] = {
+        {{{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{176, 246, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {223, 241, 252, 255, 255, 255, 255, 255, 255, 255, 255},
+          {249, 253, 253, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 244, 252, 255, 255, 255, 255, 255, 255, 255, 255},
+          {234, 254, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {253, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 246, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {239, 253, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {254, 255, 254, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 248, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {251, 255, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 253, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {251, 254, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {254, 255, 254, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 254, 253, 255, 254, 255, 255, 255, 255, 255, 255},
+          {250, 255, 254, 255, 254, 255, 255, 255, 255, 255, 255},
+          {254, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}}},
+        {{{217, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {225, 252, 241, 253, 255, 255, 254, 255, 255, 255, 255},
+          {234, 250, 241, 250, 253, 255, 253, 254, 255, 255, 255}},
+         {{255, 254, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {223, 254, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {238, 253, 254, 254, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 248, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {249, 254, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 253, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {247, 254, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 253, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {252, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 254, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {253, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 254, 253, 255, 255, 255, 255, 255, 255, 255, 255},
+          {250, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {254, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}}},
+        {{{186, 251, 250, 255, 255, 255, 255, 255, 255, 255, 255},
+          {234, 251, 244, 254, 255, 255, 255, 255, 255, 255, 255},
+          {251, 251, 243, 253, 254, 255, 254, 255, 255, 255, 255}},
+         {{255, 253, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {236, 253, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {251, 253, 253, 254, 254, 255, 255, 255, 255, 255, 255}},
+         {{255, 254, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {254, 254, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 254, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {254, 254, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {254, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {254, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}}},
+        {{{248, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {250, 254, 252, 254, 255, 255, 255, 255, 255, 255, 255},
+          {248, 254, 249, 253, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 253, 253, 255, 255, 255, 255, 255, 255, 255, 255},
+          {246, 253, 253, 255, 255, 255, 255, 255, 255, 255, 255},
+          {252, 254, 251, 254, 254, 255, 255, 255, 255, 255, 255}},
+         {{255, 254, 252, 255, 255, 255, 255, 255, 255, 255, 255},
+          {248, 254, 253, 255, 255, 255, 255, 255, 255, 255, 255},
+          {253, 255, 254, 254, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 251, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {245, 251, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {253, 253, 254, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 251, 253, 255, 255, 255, 255, 255, 255, 255, 255},
+          {252, 253, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 254, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 252, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {249, 255, 254, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 254, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 255, 253, 255, 255, 255, 255, 255, 255, 255, 255},
+          {250, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}},
+         {{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {254, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+          {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}}}};
+
+// The decoding tree for the segment ID
+static const jebp_byte jebp__segment_tree[JEBP__NB_TREE(JEBP__NB_SEGMENTS)] = {
+    2, 4, -0, -1, -2, -3};
+
+// The decoding tree for the Y prediction mode
+static const jebp_byte jebp__y_pred_tree[JEBP__NB_TREE(JEBP__NB_Y_PRED_TYPES)] =
+    {-JEBP__VP8_PRED_B,
+     2,
+     4,
+     6,
+     -JEBP__VP8_PRED_DC,
+     -JEBP__VP8_PRED_V,
+     -JEBP__VP8_PRED_H,
+     -JEBP__VP8_PRED_TM};
+
+// The fixed probabilities for the Y prediction mode
+static const jebp_ubyte jebp__y_pred_probs[JEBP__NB_PROBS(
+    JEBP__NB_Y_PRED_TYPES)] = {145, 156, 163, 128};
+
+// The decoding tree for the Y subblock modes (when the prediction mode is B)
+static const jebp_byte jebp__b_pred_tree[JEBP__NB_TREE(JEBP__NB_B_PRED_TYPES)] =
+    {-JEBP__B_PRED_DC,
+     2,
+     -JEBP__B_PRED_TM,
+     4,
+     -JEBP__B_PRED_VE,
+     6,
+     8,
+     12,
+     -JEBP__B_PRED_HE,
+     10,
+     -JEBP__B_PRED_RD,
+     -JEBP__B_PRED_VR,
+     -JEBP__B_PRED_LD,
+     14,
+     -JEBP__B_PRED_VL,
+     16,
+     -JEBP__B_PRED_HD,
+     -JEBP__B_PRED_HU};
+
+// The fixed probabilities for the Y subblock modes based on nearby subblock
+// modes
+static const jebp_ubyte
+    jebp__b_pred_probs[JEBP__NB_B_PRED_TYPES][JEBP__NB_B_PRED_TYPES]
+                      [JEBP__NB_PROBS(JEBP__NB_B_PRED_TYPES)] = {
+                          {{231, 120, 48, 89, 115, 113, 120, 152, 112},
+                           {152, 179, 64, 126, 170, 118, 46, 70, 95},
+                           {175, 69, 143, 80, 85, 82, 72, 155, 103},
+                           {56, 58, 10, 171, 218, 189, 17, 13, 152},
+                           {144, 71, 10, 38, 171, 213, 144, 34, 26},
+                           {114, 26, 17, 163, 44, 195, 21, 10, 173},
+                           {121, 24, 80, 195, 26, 62, 44, 64, 85},
+                           {170, 46, 55, 19, 136, 160, 33, 206, 71},
+                           {63, 20, 8, 114, 114, 208, 12, 9, 226},
+                           {81, 40, 11, 96, 182, 84, 29, 16, 36}},
+                          {{134, 183, 89, 137, 98, 101, 106, 165, 148},
+                           {72, 187, 100, 130, 157, 111, 32, 75, 80},
+                           {66, 102, 167, 99, 74, 62, 40, 234, 128},
+                           {41, 53, 9, 178, 241, 141, 26, 8, 107},
+                           {104, 79, 12, 27, 217, 255, 87, 17, 7},
+                           {74, 43, 26, 146, 73, 166, 49, 23, 157},
+                           {65, 38, 105, 160, 51, 52, 31, 115, 128},
+                           {87, 68, 71, 44, 114, 51, 15, 186, 23},
+                           {47, 41, 14, 110, 182, 183, 21, 17, 194},
+                           {66, 45, 25, 102, 197, 189, 23, 18, 22}},
+                          {{88, 88, 147, 150, 42, 46, 45, 196, 205},
+                           {43, 97, 183, 117, 85, 38, 35, 179, 61},
+                           {39, 53, 200, 87, 26, 21, 43, 232, 171},
+                           {56, 34, 51, 104, 114, 102, 29, 93, 77},
+                           {107, 54, 32, 26, 51, 1, 81, 43, 31},
+                           {39, 28, 85, 171, 58, 165, 90, 98, 64},
+                           {34, 22, 116, 206, 23, 34, 43, 166, 73},
+                           {68, 25, 106, 22, 64, 171, 36, 225, 114},
+                           {34, 19, 21, 102, 132, 188, 16, 76, 124},
+                           {62, 18, 78, 95, 85, 57, 50, 48, 51}},
+                          {{193, 101, 35, 159, 215, 111, 89, 46, 111},
+                           {60, 148, 31, 172, 219, 228, 21, 18, 111},
+                           {112, 113, 77, 85, 179, 255, 38, 120, 114},
+                           {40, 42, 1, 196, 245, 209, 10, 25, 109},
+                           {100, 80, 8, 43, 154, 1, 51, 26, 71},
+                           {88, 43, 29, 140, 166, 213, 37, 43, 154},
+                           {61, 63, 30, 155, 67, 45, 68, 1, 209},
+                           {142, 78, 78, 16, 255, 128, 34, 197, 171},
+                           {41, 40, 5, 102, 211, 183, 4, 1, 221},
+                           {51, 50, 17, 168, 209, 192, 23, 25, 82}},
+                          {{125, 98, 42, 88, 104, 85, 117, 175, 82},
+                           {95, 84, 53, 89, 128, 100, 113, 101, 45},
+                           {75, 79, 123, 47, 51, 128, 81, 171, 1},
+                           {57, 17, 5, 71, 102, 57, 53, 41, 49},
+                           {115, 21, 2, 10, 102, 255, 166, 23, 6},
+                           {38, 33, 13, 121, 57, 73, 26, 1, 85},
+                           {41, 10, 67, 138, 77, 110, 90, 47, 114},
+                           {101, 29, 16, 10, 85, 128, 101, 196, 26},
+                           {57, 18, 10, 102, 102, 213, 34, 20, 43},
+                           {117, 20, 15, 36, 163, 128, 68, 1, 26}},
+                          {{138, 31, 36, 171, 27, 166, 38, 44, 229},
+                           {67, 87, 58, 169, 82, 115, 26, 59, 179},
+                           {63, 59, 90, 180, 59, 166, 93, 73, 154},
+                           {40, 40, 21, 116, 143, 209, 34, 39, 175},
+                           {57, 46, 22, 24, 128, 1, 54, 17, 37},
+                           {47, 15, 16, 183, 34, 223, 49, 45, 183},
+                           {46, 17, 33, 183, 6, 98, 15, 32, 183},
+                           {65, 32, 73, 115, 28, 128, 23, 128, 205},
+                           {40, 3, 9, 115, 51, 192, 18, 6, 223},
+                           {87, 37, 9, 115, 59, 77, 64, 21, 47}},
+                          {{104, 55, 44, 218, 9, 54, 53, 130, 226},
+                           {64, 90, 70, 205, 40, 41, 23, 26, 57},
+                           {54, 57, 112, 184, 5, 41, 38, 166, 213},
+                           {30, 34, 26, 133, 152, 116, 10, 32, 134},
+                           {75, 32, 12, 51, 192, 255, 160, 43, 51},
+                           {39, 19, 53, 221, 26, 114, 32, 73, 255},
+                           {31, 9, 65, 234, 2, 15, 1, 118, 73},
+                           {88, 31, 35, 67, 102, 85, 55, 186, 85},
+                           {56, 21, 23, 111, 59, 205, 45, 37, 192},
+                           {55, 38, 70, 124, 73, 102, 1, 34, 98}},
+                          {{102, 61, 71, 37, 34, 53, 31, 243, 192},
+                           {69, 60, 71, 38, 73, 119, 28, 222, 37},
+                           {68, 45, 128, 34, 1, 47, 11, 245, 171},
+                           {62, 17, 19, 70, 146, 85, 55, 62, 70},
+                           {75, 15, 9, 9, 64, 255, 184, 119, 16},
+                           {37, 43, 37, 154, 100, 163, 85, 160, 1},
+                           {63, 9, 92, 136, 28, 64, 32, 201, 85},
+                           {86, 6, 28, 5, 64, 255, 25, 248, 1},
+                           {56, 8, 17, 132, 137, 255, 55, 116, 128},
+                           {58, 15, 20, 82, 135, 57, 26, 121, 40}},
+                          {{164, 50, 31, 137, 154, 133, 25, 35, 218},
+                           {51, 103, 44, 131, 131, 123, 31, 6, 158},
+                           {86, 40, 64, 135, 148, 224, 45, 183, 128},
+                           {22, 26, 17, 131, 240, 154, 14, 1, 209},
+                           {83, 12, 13, 54, 192, 255, 68, 47, 28},
+                           {45, 16, 21, 91, 64, 222, 7, 1, 197},
+                           {56, 21, 39, 155, 60, 138, 23, 102, 213},
+                           {85, 26, 85, 85, 128, 128, 32, 146, 171},
+                           {18, 11, 7, 63, 144, 171, 4, 4, 246},
+                           {35, 27, 10, 146, 174, 171, 12, 26, 128}},
+                          {{190, 80, 35, 99, 180, 80, 126, 54, 45},
+                           {85, 126, 47, 87, 176, 51, 41, 20, 32},
+                           {101, 75, 128, 139, 118, 146, 116, 128, 85},
+                           {56, 41, 15, 176, 236, 85, 37, 9, 62},
+                           {146, 36, 19, 30, 171, 255, 97, 27, 20},
+                           {71, 30, 17, 119, 118, 255, 17, 18, 138},
+                           {101, 38, 60, 138, 55, 70, 43, 26, 142},
+                           {138, 45, 61, 62, 219, 1, 81, 188, 64},
+                           {32, 41, 20, 117, 151, 142, 20, 21, 163},
+                           {112, 19, 12, 61, 195, 128, 48, 4, 24}}};
+
+// The decoding tree for the UV prediction mode
+static const jebp_byte
+    jebp__uv_pred_tree[JEBP__NB_TREE(JEBP__NB_UV_PRED_TYPES)] = {
+        -JEBP__VP8_PRED_DC, 2, -JEBP__VP8_PRED_V, 4, -JEBP__VP8_PRED_H,
+        -JEBP__VP8_PRED_TM};
+
+// The fixed probabilities for the UV prediction mode
+static const jebp_ubyte jebp__uv_pred_probs[JEBP__NB_PROBS(
+    JEBP__NB_UV_PRED_TYPES)] = {142, 114, 183};
+
+// Maps UV prediction modes (non B-mode) to subblock B prediction modes for use
+// with probabilities of later B-mode macroblocks
+// TODO: can we just reorder the `jebp__b_pred_type_t` enum to match?
+static const jebp__b_pred_type_t jebp__uv_pred_b_type[JEBP__NB_UV_PRED_TYPES] =
+    {JEBP__B_PRED_DC, JEBP__B_PRED_VE, JEBP__B_PRED_HE, JEBP__B_PRED_TM};
+
+// Which bands each coefficient goes into for token complexities
+static const jebp_byte jebp__coeff_bands[JEBP__NB_BLOCK_COEFFS] = {
+    0, 1, 2, 3, 6, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7};
+
+// The zig-zag order of the coefficients
+//   [0]= 0  [1]= 1  [5]= 2  [6]= 3
+//   [2]= 4  [4]= 5  [7]= 6 [12]= 7
+//   [3]= 8  [8]= 9 [11]=10 [13]=11
+//   [9]=12 [10]=13 [14]=14 [15]=15
+static const jebp_byte jebp__coeff_order[JEBP__NB_BLOCK_COEFFS] = {
+    0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15};
+
+// The fixed tree for token decoding, using the probabilities defined in the
+// header. This doesn't include the EOB branch at the start since that may be
+// skipped.
+static const jebp_byte jebp__token_tree[JEBP__NB_TREE(JEBP__NB_TOKENS - 1)] = {
+    -JEBP__TOKEN_COEFF0,
+    2,
+    -JEBP__TOKEN_COEFF1,
+    4,
+    6,
+    10,
+    -JEBP__TOKEN_COEFF2,
+    8,
+    -JEBP__TOKEN_COEFF3,
+    -JEBP__TOKEN_COEFF4,
+    12,
+    14,
+    -JEBP__TOKEN_EXTRA1,
+    -JEBP__TOKEN_EXTRA2,
+    16,
+    18,
+    -JEBP__TOKEN_EXTRA3,
+    -JEBP__TOKEN_EXTRA4,
+    -JEBP__TOKEN_EXTRA5,
+    -JEBP__TOKEN_EXTRA6};
+
+static const jebp__token_extra_t jebp__token_extra[JEBP__NB_EXTRA_TOKENS] = {
+    {5, {159, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+    {7, {165, 145, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+    {11, {173, 148, 140, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+    {19, {176, 155, 140, 135, 0, 0, 0, 0, 0, 0, 0, 0}},
+    {35, {180, 157, 141, 134, 130, 0, 0, 0, 0, 0, 0, 0}},
+    {67, {254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129, 0}},
+};
+#endif // JEBP_NO_VP8
+
 #ifndef JEBP_NO_VP8L
 // The order that meta lengths are read
 static const jebp_byte jebp__meta_length_order[JEBP__NB_META_SYMBOLS] = {
