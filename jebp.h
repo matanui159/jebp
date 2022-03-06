@@ -694,7 +694,7 @@ static jebp_uint jebp__read_uint32(jebp__reader_t *reader, jebp_error_t *err) {
     return value;
 #else  // JEBP__LITTLE_ENDIAN
     jebp_ubyte bytes[4];
-    *err = jebp__read_bytes(ctx, 4, bytes);
+    *err = jebp__read_bytes(reader, 4, bytes);
     return (jebp_uint)bytes[0] | ((jebp_uint)bytes[1] << 8) |
            ((jebp_uint)bytes[2] << 16) | ((jebp_uint)bytes[3] << 24);
 #endif // JEBP__LITTLE_ENDIAN
@@ -1765,6 +1765,13 @@ static jebp_error_t jebp__read_vp8l_header(jebp_image_t *image,
     return err;
 }
 
+static jebp_error_t jebp__read_vp8l_size(jebp_image_t *image,
+                                         jebp__reader_t *reader,
+                                         jebp__chunk_t *chunk) {
+    jebp__bit_reader_t bits;
+    return jebp__read_vp8l_header(image, reader, &bits, chunk);
+}
+
 static jebp_error_t jebp__read_vp8l_nohead(jebp_image_t *image,
                                            jebp__bit_reader_t *bits) {
     jebp_error_t err = JEBP_OK;
@@ -1872,9 +1879,8 @@ static jebp_error_t jebp__read_size(jebp_image_t *image,
 
     switch (chunk.tag) {
 #ifndef JEBP_NO_VP8L
-    case JEBP__VP8L_TAG:;
-        jebp__bit_reader_t bits;
-        return jebp__read_vp8l_header(image, reader, &bits, &chunk);
+    case JEBP__VP8L_TAG:
+        return jebp__read_vp8l_size(image, reader, &chunk);
 #endif // JEBP_NO_VP8L
     default:
         return JEBP_ERROR_NOSUP_CODEC;
