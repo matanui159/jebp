@@ -7,55 +7,43 @@
 #define VIEW_TITLE_SIZE 1024
 #define VIEW_BLOCK_SIZE 8
 
-static jebp_image_t view_image;
 static char view_title[VIEW_TITLE_SIZE];
-static SDL_Window *view_window;
-static SDL_Surface *view_surface;
-
-static void view_destroy(void) {
-    jebp_free_image(&view_image);
-    if (view_window != NULL) {
-        SDL_DestroyWindow(view_window);
-    }
-    if (view_surface != NULL) {
-        SDL_FreeSurface(view_surface);
-    }
-    SDL_Quit();
-}
-
-static void view_error(const char *error) {
-    view_destroy();
-    fprintf(stderr, "%s\n", error);
-    exit(EXIT_FAILURE);
-}
 
 int main(int argc, char **argv) {
     if (argc != 2) {
-        view_error("Usage: jebpview <WebP file>");
+        fprintf(stderr, "Usage: jebpview <WebP file>\n");
+        return EXIT_FAILURE;
     }
-    jebp_error_t err = jebp_read(&view_image, argv[1]);
+
+    jebp_image_t image;
+    jebp_error_t err = jebp_read(&image, argv[1]);
     if (err != JEBP_OK) {
-        view_error(jebp_error_string(err));
+        fprintf(stderr, "Failed to read image: %s\n", jebp_error_string(err));
+        return EXIT_FAILURE;
     }
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        view_error(SDL_GetError());
+        fprintf(stderr, "Failed to initialize SDL: %s\n", SDL_GetError());
+        jebp_free_image(&image);
+        return EXIT_FAILURE;
     }
 
     snprintf(view_title, VIEW_TITLE_SIZE, "jebpview - %s", argv[1]);
-    view_window = SDL_CreateWindow(
-        view_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        (int)view_image.width, (int)view_image.height,
-        SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
-    if (view_window == NULL) {
-        view_error(SDL_GetError());
+    SDL_Window *window = SDL_CreateWindow(
+        view_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, image.width,
+        image.height, SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
+    if (window == NULL) {
+        fprintf(stderr, "Failed to create window: %s\n", SDL_GetError());
+        SDL_Quit();
+        jebp_free_image(&image);
+        return EXIT_FAILURE;
     }
 
-    SDL_Surface *window_surface = SDL_GetWindowSurface(view_window);
+    SDL_Surface *window_surface = SDL_GetWindowSurface(window);
     Uint32 light = SDL_MapRGB(window_surface->format, 0xaa, 0xaa, 0xaa);
     Uint32 dark = SDL_MapRGB(window_surface->format, 0x55, 0x55, 0x55);
     SDL_FillRect(window_surface, NULL, light);
-    for (jebp_int y = 0; y < view_image.height; y += VIEW_BLOCK_SIZE * 2) {
-        for (jebp_int x = 0; x < view_image.width; x += VIEW_BLOCK_SIZE * 2) {
+    for (jebp_int y = 0; y < image.height; y += VIEW_BLOCK_SIZE * 2) {
+        for (jebp_int x = 0; x < image.width; x += VIEW_BLOCK_SIZE * 2) {
             SDL_Rect rect = {x + VIEW_BLOCK_SIZE, y, VIEW_BLOCK_SIZE,
                              VIEW_BLOCK_SIZE};
             SDL_FillRect(window_surface, &rect, dark);
@@ -65,24 +53,31 @@ int main(int argc, char **argv) {
         }
     }
 
-    view_surface = SDL_CreateRGBSurfaceWithFormatFrom(
-        view_image.pixels, view_image.width, view_image.height, 32,
-        view_image.width * 4, SDL_PIXELFORMAT_RGBA32);
-    if (view_surface == NULL) {
-        view_error(SDL_GetError());
+    SDL_Surface *image_surface = SDL_CreateRGBSurfaceWithFormatFrom(
+        image.pixels, image.width, image.height, 32, image.width * 4,
+        SDL_PIXELFORMAT_RGBA32);
+    if (image_surface == NULL) {
+        fprintf(stderr, "Failed to create surface: %s\n", SDL_GetError());
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        jebp_free_image(&image);
+        return EXIT_FAILURE;
     }
-    SDL_BlitSurface(view_surface, NULL, window_surface, NULL);
-    SDL_UpdateWindowSurface(view_window);
-    SDL_ShowWindow(view_window);
+    SDL_BlitSurface(image_surface, NULL, window_surface, NULL);
+    SDL_UpdateWindowSurface(window);
+    SDL_ShowWindow(window);
 
-    for (;;) {
-        SDL_Event event;
-        if (!SDL_WaitEvent(&event)) {
-            view_error(SDL_GetError());
-        }
-        if (event.type == SDL_QUIT) {
-            view_destroy();
-            return EXIT_SUCCESS;
-        }
+    int ok;
+    SDL_Event event;
+    do {
+        ok = SDL_WaitEvent(&event);
+    } while (ok && event.type != SDL_QUIT);
+    if (!ok) {
+        fprintf(stderr, "Failed to get event: %s\n", SDL_GetError());
     }
+    SDL_FreeSurface(image_surface);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    jebp_free_image(&image);
+    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
