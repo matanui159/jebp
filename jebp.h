@@ -934,6 +934,7 @@ static jebp_error_t jebp__alloc_huffman(jebp__huffman_t **huffmans,
             //               entries
             primary[i].length = 0;
             primary[i].symbol = symbol;
+            continue;
         }
         jebp_int suffix_length = primary[i].length - JEBP__MAX_PRIMARY_LENGTH;
         if (suffix_length > 0) {
@@ -985,7 +986,7 @@ static jebp_int jebp__read_symbol(jebp__huffman_t *huffmans,
         return 0;
     }
     if ((*err = jebp__buffer_bits(bits, JEBP__MAX_HUFFMAN_LENGTH)) != JEBP_OK) {
-        return *err;
+        return 0;
     }
     jebp_int code = jepb__peek_bits(bits, JEBP__MAX_PRIMARY_LENGTH);
     if (huffmans[code].symbol == JEBP__NO_HUFFMAN_SYMBOL) {
