@@ -397,44 +397,42 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #define JEBP__SWAP32(value) _byteswap_ulong(value)
 #endif
 
-// We don't do any runtime detection since that causes alot of
+// We don't do any SIMD runtime detection since that causes alot of
 // heavily-documented issues that I won't go into here. Instead, if the compiler
 // supports it (and requests it) we will use it. It helps that both x86-64 and
 // AArch64 always support the SIMD from their 32-bit counterparts.
 #if defined(__i386) || defined(__i386__) || defined(_M_IX86)
-#define JEBP__LITTLE_ENDIAN
+#define JEBP__ARCH_X86
 #if defined(__SSE2__) || _M_IX86_FP == 2
 #define JEBP__SIMD_SSE2
 #endif
 #elif defined(__x86_64) || defined(__x86_64__) || defined(_M_X64)
-#define JEBP__LITTLE_ENDIAN
+#define JEBP__ARCH_X86
 #define JEBP__SIMD_SSE2
 #elif defined(__arm) || defined(__arm__) || defined(_M_ARM)
-#define JEBP__ARM_ENDIANNESS
+#define JEBP__ARCH_ARM
 #if defined(__ARM_NEON) || defined(_MSC_VER)
 // According to the following article, MSVC requires Neon support
 // https://docs.microsoft.com/en-us/cpp/build/overview-of-arm-abi-conventions
 #define JEBP__SIMD_NEON
 #endif
 #elif defined(__aarch64) || defined(__aarch64__) || defined(_M_ARM64)
-#define JEBP__ARM_ENDIANNESS
+#define JEBP__ARCH_ARM
 #define JEBP__SIMD_NEON
-#else
-// Unknown architecture
-#ifdef __LITTLE_ENDIAN__
-#define JEBP__LITTLE_ENDIAN
-#endif // __LITTLE_ENDIAN__
 #endif
-#ifdef JEBP__ARM_ENDIANNESS
-// Both AArch32 and AArch64 have the same endianness check
-// The ACLE define overrules everything else
-#ifndef __ARM_BIG_ENDIAN
-#if defined(__ARM_ACLE) || defined(__LITTLE_ENDIAN__) || defined(_MSC_VER)
+
+#if defined(JEBP__ARCH_X86)
+// x86 is always little-endian
+#define JEBP__LITTLE_ENDIAN
+#elif defined(JEBP__ARCH_ARM) && defined(__ARM_BIG_ENDIAN)
+// The ACLE big-endian define overrules everything else, including the defualt
+// endianness detection
+#elif defined(JEBP__ARCH_ARM) && (defined(__ARM_ACLE) || defined(_MSC_VER))
 // If ACLE is supported and big-endian is not defined, it must be little-endian
 // According to the article linked above, MSVC only supports little-endian
 #define JEBP__LITTLE_ENDIAN
-#endif
-#endif // __ARM_BIG_ENDIAN
+#elif defined(__LITTLE_ENDIAN__) || __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define JEBP__LITTLE_ENDIAN
 #endif
 
 #ifdef JEBP_NO_SIMD
