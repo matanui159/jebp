@@ -44,7 +44,7 @@ Do not worry, these are all just files to help with development, none (except
   `JEBP_IMPLEMENTATION` and then include `jebp.h`.
 - `jebpview.c` is a demo program using SDL2 to show a WebP image. Use it with
   `jebpview <WebP image>`.
-- `CMakeLists.txr` and `dev` are build and development files to help with
+- `CMakeLists.txt` and `dev` are build and development files to help with
   development and CI. They build `jebpview`, E2E tests and the fuzz test, along
   with making it easier to run tests and format code. The cross files are
   designed to run in the CI.
