@@ -408,25 +408,31 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #define JEBP__LITTLE_ENDIAN
 #define JEBP__SIMD_SSE2
 #elif defined(__arm) || defined(__arm__) || defined(_M_ARM)
-#if !defined(__ARM_BIG_ENDIAN) || defined(__LITTLE_ENDIAN__)
-// Is Windows always little-endian? I get alot of conflicting results...
-#define JEBP__LITTLE_ENDIAN
-#endif
-#ifdef __ARM_NEON
-// There used to be a check for Windows here since I believed that Windows
-// always required Neon support to be installed but I cannot find that mentioned
-// anywhere.
+#define JEBP__ARM_ENDIANNESS
+#if defined(__ARM_NEON) || defined(_MSC_VER)
+// According to the following article, MSVC requires Neon support
+// https://docs.microsoft.com/en-us/cpp/build/overview-of-arm-abi-conventions
 #define JEBP__SIMD_NEON
-#endif // __ARM_NEON
-#elif defined(__aarch64) || defined(__aarch64__) || defined(_M_ARM64)
-#if !defined(__ARM_BIG_ENDIAN) || defined(__LITTLE_ENDIAN__)
-#define JEBP__LITTLE_ENDIAN
 #endif
+#elif defined(__aarch64) || defined(__aarch64__) || defined(_M_ARM64)
+#define JEBP__ARM_ENDIANNESS
 #define JEBP__SIMD_NEON
 #else
+// Unknown architecture
 #ifdef __LITTLE_ENDIAN__
 #define JEBP__LITTLE_ENDIAN
 #endif // __LITTLE_ENDIAN__
+#endif
+#ifdef JEBP__ARM_ENDIANNESS
+// Both AArch32 and AArch64 have the same endianness check
+// The ACLE define overrules everything else
+#ifndef __ARM_BIG_ENDIAN
+#if defined(__ARM_ACLE) || defined(__LITTLE_ENDIAN__) || defined(_MSC_VER)
+// If ACLE is supported and big-endian is not defined, it must be little-endian
+// According to the article linked above, MSVC only supports little-endian
+#define JEBP__LITTLE_ENDIAN
+#endif
+#endif // __ARM_BIG_ENDIAN
 #endif
 
 #ifdef JEBP_NO_SIMD
