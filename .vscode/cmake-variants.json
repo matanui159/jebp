@@ -1,0 +1,66 @@
+{
+    "buildType": {
+        "default": "debug",
+        "choices": {
+            "debug": {
+                "short": "Debug",
+                "long": "Build with debug info",
+                "buildType": "Debug"
+            },
+            "release": {
+                "short": "Release",
+                "long": "Build with optimizations",
+                "buildType": "Release"
+            }
+        }
+    },
+    "stdio": {
+        "default": "on",
+        "choices": {
+            "on": {
+                "short": "I/O",
+                "long": "Enable I/O support",
+                "settings": { "JEBP_STDIO": "ON" }
+            },
+            "off": {
+                "short": "No I/O",
+                "long": "Disable I/O support",
+                "settings": { "JEBP_STDIO": "OFF" }
+            }
+        }
+    },
+    "simd": {
+        "default": "on",
+        "choices": {
+            "on": {
+                "short": "SIMD",
+                "long": "Enable SIMD optimizations",
+                "settings": { "JEBP_SIMD": "ON" }
+            },
+            "off": {
+                "short": "No SIMD",
+                "long": "Disable SIMD optimizations",
+                "settings": { "JEBP_SIMD": "OFF" }
+            }
+        }
+    },
+    "codec": {
+        "default": "all",
+        "choices": {
+            "all": {
+                "short": "All codecs",
+                "long": "Enable all codecs",
+                "settings": {
+                    "JEBP_VP8L": "ON"
+                }
+            },
+            "vp8l": {
+                "short": "VP8L only",
+                "long": "Enable only VP8L support",
+                "settings": {
+                    "JEBP_VP8L": "ON"
+                }
+            }
+        }
+    }
+}

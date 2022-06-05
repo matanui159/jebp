@@ -1,0 +1,31 @@
+{
+    "version": "0.2.0",
+    "inputs": [
+        {
+            "description": "WebP input image",
+            "id": "image",
+            "type": "pickString",
+            "options": [
+                "lossless/rose.webp",
+                "lossless/tux.webp",
+                "lossless/dice.webp",
+                "lossless/compass.webp"
+            ]
+        }
+    ],
+    "configurations": [
+        {
+            "name": "Debug jebpview",
+            "type": "cppdbg",
+            "request": "launch",
+            "MIMode": "gdb",
+            "program": "${command:cmake.buildDirectory}/jebpview",
+            "cwd": "${workspaceFolder}",
+            "args": ["dev/${input:image}"],
+            "preLaunchTask": "Build jebpview",
+            "osx": {
+                "MIMode": "lldb"
+            }
+        }
+    ]
+}
