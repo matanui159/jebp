@@ -19,10 +19,10 @@
             "type": "cppdbg",
             "request": "launch",
             "MIMode": "gdb",
-            "program": "${command:cmake.buildDirectory}/jebpview",
             "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/bin/jebpview",
             "args": ["dev/${input:image}"],
-            "preLaunchTask": "Build jebpview",
+            "preLaunchTask": "Build",
             "osx": {
                 "MIMode": "lldb"
             }

@@ -2,10 +2,10 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build jebpview",
-            "type": "cmake",
-            "command": "build",
-            "targets": ["jebpview"]
+            "label": "Build",
+            "type": "shell",
+            "group": "build",
+            "command": "make -C bin"
         }
     ]
 }
