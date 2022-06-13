@@ -1603,7 +1603,28 @@ JEBP__INLINE jebp_error_t jebp__apply_color_transform(
 }
 
 JEBP__INLINE jebp_error_t jebp__apply_green_transform(jebp_image_t *image) {
-    for (jebp_int i = 0; i < image->width * image->height; i += 1) {
+    jebp_int size = image->width * image->height;
+    jebp_int i = 0;
+#if defined(JEBP__SIMD_SSE2)
+    for (; i + 4 < size; i += 4) {
+        __m128i *pixel = (__m128i *)&image->pixels[i];
+        __m128i v_pixel = _mm_load_si128(pixel);
+        __m128i v_green = _mm_srli_epi16(v_pixel, 8);
+        v_green = _mm_shufflelo_epi16(v_green, 0xa0);
+        v_green = _mm_shufflehi_epi16(v_green, 0xa0);
+        v_pixel = _mm_add_epi8(v_pixel, v_green);
+        _mm_store_si128(pixel, v_pixel);
+    }
+#elif defined(JEBP__SIMD_NEON)
+    for (; i + 16 < size; i += 16) {
+        jebp_ubyte *pixel = (jebp_ubyte *)&image->pixels[i];
+        uint8x16x4_t v_pixel = vld4q_u8(pixel);
+        v_pixel.val[0] = vaddq_u8(v_pixel.val[0], v_pixel.val[1]);
+        v_pixel.val[2] = vaddq_u8(v_pixel.val[2], v_pixel.val[1]);
+        vst4q_u8(pixel, v_pixel);
+    }
+#endif
+    for (; i < size; i += 1) {
         jebp_color_t *pixel = &image->pixels[i];
         pixel->r += pixel->g;
         pixel->b += pixel->g;
