@@ -26,6 +26,19 @@
             "osx": {
                 "MIMode": "lldb"
             }
+        },
+        {
+            "name": "Debug jebptest (lossless rose)",
+            "type": "cppdbg",
+            "request": "launch",
+            "MIMode": "gdb",
+            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/bin/dev/jebptest",
+            "args": ["dev/lossless/rose.webp", "512x384", "943882e6"],
+            "preLaunchTask": "Build",
+            "osx": {
+                "MIMode": "lldb"
+            }
         }
     ]
 }

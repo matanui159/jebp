@@ -1445,10 +1445,23 @@ static void jebp__vp8l_pred7(jebp_color_t *pixel, jebp_color_t *top,
 static void jebp__vp8l_pred8(jebp_color_t *pixel, jebp_color_t *top,
                              jebp_int width) {
     jebp_int x = 0;
-#if defined(JEBP__SIMD_NEON)
+#if defined(JEBP__SIMD_SSE2)
+    __m128i v_one = _mm_set1_epi8(1);
+    for (; x + 4 <= width; x += 4) {
+        __m128i v_pixel = _mm_loadu_si128((__m128i *)&pixel[x]);
+        __m128i v_tl = _mm_loadu_si128((__m128i *)&top[x - 1]);
+        __m128i v_top = _mm_loadu_si128((__m128i *)&top[x]);
+        __m128i v_avg = _mm_avg_epu8(v_tl, v_top);
+        __m128i v_err = _mm_xor_si128(v_tl, v_top);
+        v_err = _mm_and_si128(v_err, v_one);
+        v_avg = _mm_sub_epi8(v_avg, v_err);
+        v_pixel = _mm_add_epi8(v_pixel, v_avg);
+        _mm_storeu_si128((__m128i *)&pixel[x], v_pixel);
+    }
+#elif defined(JEBP__SIMD_NEON)
     uint8x16_t v_tl;
     if (width >= 4) {
-        v_tl = vld1q_u8((uint8_t *)&top[x - 1]);
+        v_tl = vld1q_u8((uint8_t *)&top[-1]);
     }
     for (; x + 4 <= width; x += 4) {
         uint8x16_t v_pixel = vld1q_u8((uint8_t *)&pixel[x]);
@@ -1471,7 +1484,20 @@ static void jebp__vp8l_pred8(jebp_color_t *pixel, jebp_color_t *top,
 static void jebp__vp8l_pred9(jebp_color_t *pixel, jebp_color_t *top,
                              jebp_int width) {
     jebp_int x = 0;
-#if defined(JEBP__SIMD_NEON)
+#if defined(JEBP__SIMD_SSE2)
+    __m128i v_one = _mm_set1_epi8(1);
+    for (; x + 4 <= width; x += 4) {
+        __m128i v_pixel = _mm_loadu_si128((__m128i *)&pixel[x]);
+        __m128i v_top = _mm_loadu_si128((__m128i *)&top[x]);
+        __m128i v_tr = _mm_loadu_si128((__m128i *)&top[x + 1]);
+        __m128i v_avg = _mm_avg_epu8(v_top, v_tr);
+        __m128i v_err = _mm_xor_si128(v_top, v_tr);
+        v_err = _mm_and_si128(v_err, v_one);
+        v_avg = _mm_sub_epi8(v_avg, v_err);
+        v_pixel = _mm_add_epi8(v_pixel, v_avg);
+        _mm_storeu_si128((__m128i *)&pixel[x], v_pixel);
+    }
+#elif defined(JEBP__SIMD_NEON)
     uint8x16_t v_top;
     if (width >= 4) {
         v_top = vld1q_u8((uint8_t *)top);
