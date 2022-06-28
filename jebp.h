@@ -1282,6 +1282,30 @@ typedef struct jebp__short_color_t {
     jebp_short a;
 } jebp__short_color_t;
 
+#ifdef JEBP__SIMD_SSE2
+JEBP__INLINE __m128i jebp__sse_avg_u8(__m128i v0, __m128i v1) {
+    __m128i v_one = _mm_set1_epi8(1);
+    __m128i v_avg = _mm_avg_epu8(v0, v1);
+    // SSE2 `avg` rounds up, we have to check if a round-up occured (one of the
+    // low bits was set but the other wasn't) and subtract 1 if so
+    __m128i v_fix = _mm_xor_si128(v0, v1);
+    v_fix = _mm_and_si128(v_fix, v_one);
+    return _mm_sub_epi8(v_avg, v_fix);
+}
+#endif // JEBP__SIMD_SSE2
+
+#ifdef JEBP__SIMD_NEON
+JEBP__INLINE uint8x16_t jebp__neon_ld1_pixel(jebp_color_t *pixel) {
+    uint32x4_t v_zero = vdupq_n_u32(0);
+    uint8x16_t v_pixel =
+        (uint8x16_t)vld1q_lane_u32((uint32_t *)pixel, v_zero, 0);
+#ifndef JEBP__LITTLE_ENDIAN
+    v_pixel = vrev32q_u8(v_pixel);
+#endif
+    return v_pixel;
+}
+#endif // JEBP__SIMD_NEON
+
 JEBP__INLINE void jebp__vp8l_pred_black(jebp_color_t *pixel, jebp_int width) {
     jebp_int x = 0;
 #if defined(JEBP__SIMD_SSE2)
@@ -1292,11 +1316,11 @@ JEBP__INLINE void jebp__vp8l_pred_black(jebp_color_t *pixel, jebp_int width) {
         _mm_storeu_si128((__m128i *)&pixel[x], v_pixel);
     }
 #elif defined(JEBP__SIMD_NEON)
-    uint8x16_t v_black = (uint8x16_t)vdupq_n_u32(0xff000000);
-    for (; x + 4 <= width; x += 4) {
-        uint8x16_t v_pixel = vld1q_u8((uint8_t *)&pixel[x]);
-        v_pixel = vaddq_u8(v_pixel, v_black);
-        vst1q_u8((uint8_t *)&pixel[x], v_pixel);
+    uint8x8_t v_black = vdup_n_u8(0xff);
+    for (; x + 8 <= width; x += 8) {
+        uint8x8x4_t v_pixel = vld4_u8((uint8_t *)&pixel[x]);
+        v_pixel.val[3] = vadd_u8(v_pixel.val[3], v_black);
+        vst4_u8((uint8_t *)&pixel[x], v_pixel);
     }
 #endif
     for (; x < width; x += 1) {
@@ -1313,38 +1337,35 @@ static void jebp__vp8l_pred0(jebp_color_t *pixel, jebp_color_t *top,
 JEBP__INLINE void jebp__vp8l_pred_left(jebp_color_t *pixel, jebp_int width) {
     jebp_int x = 0;
 #if defined(JEBP__SIMD_SSE2)
-    __m128i v_prev;
+    __m128i v_left;
     if (width >= 4) {
-        v_prev = _mm_set1_epi32(*(int *)&pixel[-1]);
+        v_left = _mm_loadu_si32(&pixel[-1]);
     }
     for (; x + 4 <= width; x += 4) {
-        __m128i v_left;
         __m128i v_pixel = _mm_loadu_si128((__m128i *)&pixel[x]);
+        v_pixel = _mm_add_epi8(v_pixel, v_left);
         v_left = _mm_bslli_si128(v_pixel, 4);
         v_pixel = _mm_add_epi8(v_pixel, v_left);
         v_left = _mm_bslli_si128(v_pixel, 8);
         v_pixel = _mm_add_epi8(v_pixel, v_left);
-        v_pixel = _mm_add_epi8(v_pixel, v_prev);
         _mm_storeu_si128((__m128i *)&pixel[x], v_pixel);
-        v_prev = _mm_shuffle_epi32(v_pixel, _MM_SHUFFLE(3, 3, 3, 3));
+        v_left = _mm_bsrli_si128(v_pixel, 12);
     }
 #elif defined(JEBP__SIMD_NEON)
     uint8x16_t v_zero = vdupq_n_u8(0);
-    uint8x16_t v_prev;
+    uint8x16_t v_left;
     if (width >= 4) {
-        v_prev = vld1q_u8((uint8_t *)&pixel[-1]);
-        v_prev = (uint8x16_t)vdupq_laneq_u32((uint32x4_t)v_prev, 0);
+        v_left = jebp__neon_ld1_pixel(&pixel[-1]);
     }
     for (; x + 4 <= width; x += 4) {
-        uint8x16_t v_left;
         uint8x16_t v_pixel = vld1q_u8((uint8_t *)&pixel[x]);
+        v_pixel = vaddq_u8(v_pixel, v_left);
         v_left = vextq_u8(v_zero, v_pixel, 12);
         v_pixel = vaddq_u8(v_pixel, v_left);
         v_left = vextq_u8(v_zero, v_pixel, 8);
         v_pixel = vaddq_u8(v_pixel, v_left);
-        v_pixel = vaddq_u8(v_pixel, v_prev);
         vst1q_u8((uint8_t *)&pixel[x], v_pixel);
-        v_prev = (uint8x16_t)vdupq_laneq_u32((uint32x4_t)v_pixel, 3);
+        v_left = vextq_u8(v_pixel, v_zero, 12);
     }
 #endif
     for (; x < width; x += 1) {
@@ -1453,7 +1474,7 @@ static void jebp__vp8l_pred5(jebp_color_t *pixel, jebp_color_t *top,
     uint16x4_t v_left;
     if (width >= 2) {
         v_top = vld1_u8((uint8_t *)top);
-        uint8x8_t v_pixel = vld1_u8((uint8_t *)&pixel[-1]);
+        uint8x8_t v_pixel = vget_low_u8(jebp__neon_ld1_pixel(&pixel[-1]));
         v_left = vget_low_u16(vshll_n_u8(v_pixel, 2));
     }
     for (; x + 2 <= width; x += 2) {
@@ -1494,7 +1515,7 @@ static void jebp__vp8l_pred6(jebp_color_t *pixel, jebp_color_t *top,
     uint16x4_t v_mask = vdup_n_u16(0xff);
     uint16x4_t v_left;
     if (width >= 2) {
-        uint8x8_t v_pixel = vld1_u8((uint8_t *)&pixel[-1]);
+        uint8x8_t v_pixel = vget_low_u8(jebp__neon_ld1_pixel(&pixel[-1]));
         v_left = vget_low_u16(vmovl_u8(v_pixel));
     }
     for (; x + 2 <= width; x += 2) {
@@ -1526,7 +1547,7 @@ static void jebp__vp8l_pred7(jebp_color_t *pixel, jebp_color_t *top,
     uint16x4_t v_mask = vdup_n_u16(0xff);
     uint16x4_t v_left;
     if (width >= 2) {
-        uint8x8_t v_pixel = vld1_u8((uint8_t *)&pixel[-1]);
+        uint8x8_t v_pixel = vget_low_u8(jebp__neon_ld1_pixel(&pixel[-1]));
         v_left = vget_low_u16(vmovl_u8(v_pixel));
     }
     for (; x + 2 <= width; x += 2) {
@@ -1555,16 +1576,12 @@ static void jebp__vp8l_pred8(jebp_color_t *pixel, jebp_color_t *top,
                              jebp_int width) {
     jebp_int x = 0;
 #if defined(JEBP__SIMD_SSE2)
-    __m128i v_one = _mm_set1_epi8(1);
     for (; x + 4 <= width; x += 4) {
         __m128i v_pixel = _mm_loadu_si128((__m128i *)&pixel[x]);
         __m128i v_tl = _mm_loadu_si128((__m128i *)&top[x - 1]);
         __m128i v_top = _mm_loadu_si128((__m128i *)&top[x]);
-        __m128i v_avg = _mm_avg_epu8(v_tl, v_top);
-        __m128i v_fix = _mm_xor_si128(v_tl, v_top);
-        v_fix = _mm_and_si128(v_fix, v_one);
-        v_avg = _mm_sub_epi8(v_avg, v_fix);
-        v_pixel = _mm_add_epi8(v_pixel, v_avg);
+        v_top = jebp__sse_avg_u8(v_tl, v_top);
+        v_pixel = _mm_add_epi8(v_pixel, v_top);
         _mm_storeu_si128((__m128i *)&pixel[x], v_pixel);
     }
 #elif defined(JEBP__SIMD_NEON)
@@ -1594,16 +1611,12 @@ static void jebp__vp8l_pred9(jebp_color_t *pixel, jebp_color_t *top,
                              jebp_int width) {
     jebp_int x = 0;
 #if defined(JEBP__SIMD_SSE2)
-    __m128i v_one = _mm_set1_epi8(1);
     for (; x + 4 <= width; x += 4) {
         __m128i v_pixel = _mm_loadu_si128((__m128i *)&pixel[x]);
         __m128i v_top = _mm_loadu_si128((__m128i *)&top[x]);
         __m128i v_tr = _mm_loadu_si128((__m128i *)&top[x + 1]);
-        __m128i v_avg = _mm_avg_epu8(v_top, v_tr);
-        __m128i v_fix = _mm_xor_si128(v_top, v_tr);
-        v_fix = _mm_and_si128(v_fix, v_one);
-        v_avg = _mm_sub_epi8(v_avg, v_fix);
-        v_pixel = _mm_add_epi8(v_pixel, v_avg);
+        v_tr = jebp__sse_avg_u8(v_top, v_tr);
+        v_pixel = _mm_add_epi8(v_pixel, v_tr);
         _mm_storeu_si128((__m128i *)&pixel[x], v_pixel);
     }
 #elif defined(JEBP__SIMD_NEON)
@@ -1638,7 +1651,7 @@ static void jebp__vp8l_pred10(jebp_color_t *pixel, jebp_color_t *top,
     uint16x4_t v_left;
     if (width >= 2) {
         v_tl = vld1_u8((uint8_t *)&top[x - 1]);
-        uint8x8_t v_pixel = vld1_u8((uint8_t *)&pixel[-1]);
+        uint8x8_t v_pixel = vget_low_u8(jebp__neon_ld1_pixel(&pixel[-1]));
         v_left = vget_low_u16(vshll_n_u8(v_pixel, 2));
     }
     for (; x + 2 <= width; x += 2) {
