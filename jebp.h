@@ -818,7 +818,7 @@ static jebp_error_t jebp__convert_yuv_image(jebp_image_t *out,
         // assuming it is top-left
         // Even rows
         jebp_color_t *row = &out->pixels[y * out->width];
-        uint8_t *y_row = &in->y[y * in->width];
+        jebp_ubyte *y_row = &in->y[y * in->width];
         for (jebp_int x = 0; x < out->width; x += 1) {
             row[x].r = JEBP__CONVERT_R(y_row[x], v_prev[x]);
             row[x].g = JEBP__CONVERT_G(y_row[x], u_prev[x], v_prev[x]);
@@ -1517,14 +1517,15 @@ static jebp_error_t jebp__read_macro_header(jebp__macro_header_t *hdr,
     }
 
     if (hdr->y_pred == JEBP__VP8_PRED_B) {
-        for (jebp_int i = 0; i < JEBP__NB_Y_BLOCKS; i += 1) {
-            jebp_int x = i % JEBP__Y_SIZE;
-            jebp_int y = i / JEBP__Y_SIZE;
-            hdr->b_preds[i] =
-                jebp__read_tree(bec, jebp__b_pred_tree,
-                                jebp__b_pred_probs[b_top[x]][b_left[y]], &err);
-            b_top[x] = hdr->b_preds[i];
-            b_left[y] = hdr->b_preds[i];
+        for (jebp_int y = 0; y < JEBP__Y_SIZE; y += 1) {
+            for (jebp_int x = 0; x < JEBP__Y_SIZE; x += 1) {
+                jebp_int i = y * JEBP__Y_SIZE + x;
+                hdr->b_preds[i] = jebp__read_tree(
+                    bec, jebp__b_pred_tree,
+                    jebp__b_pred_probs[b_top[x]][b_left[y]], &err);
+                b_top[x] = hdr->b_preds[i];
+                b_left[y] = hdr->b_preds[i];
+            }
         }
     }
 
@@ -1879,6 +1880,7 @@ static jebp_error_t jebp__read_vp8(jebp_image_t *image, jebp__reader_t *reader,
     size_t top_size = macro_width * sizeof(jebp__macro_state_t);
     jebp__macro_state_t *top = JEBP_ALLOC(top_size);
     if (top == NULL) {
+        jebp__free_yuv_image(&yuv_image);
         jebp__unmap_reader(&map);
         return JEBP_ERROR_NOMEM;
     }
