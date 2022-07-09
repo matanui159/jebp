@@ -789,17 +789,14 @@ static void jebp__free_yuv_image(jebp__yuv_image_t *image) {
 }
 
 JEBP__INLINE void jebp__upscale_uv_row(jebp_ubyte *out, jebp_ubyte *in,
-                                       jebp_int stride) {
-    jebp_ubyte *end = in + stride - 1;
-    jebp_ubyte prev = *(in++);
-    while (in != end) {
-        *(out++) = prev;
-        jebp_ubyte next = *(in++);
-        *(out++) = (prev + next) / 2;
-        prev = next;
+                                       jebp_int width) {
+    jebp_int x = 0;
+    for (; x < width - 1; x += 1) {
+        out[x * 2] = in[x];
+        out[x * 2 + 1] = JEBP__AVG(in[x], in[x + 1]);
     }
-    *(out++) = prev;
-    *(out++) = prev;
+    out[x * 2] = in[x];
+    out[x * 2 + 1] = in[x];
 }
 
 static jebp_error_t jebp__convert_yuv_image(jebp_image_t *out,
@@ -813,61 +810,46 @@ static jebp_error_t jebp__convert_yuv_image(jebp_image_t *out,
     jebp_ubyte *v_prev = u_prev + in->width;
     jebp_ubyte *u_next = v_prev + in->width;
     jebp_ubyte *v_next = u_next + in->width;
+    jebp__upscale_uv_row(u_prev, in->u, in->uv_width);
+    jebp__upscale_uv_row(v_prev, in->v, in->uv_width);
 
-    jebp_ubyte *y = in->y;
-    jebp_ubyte *u = in->u;
-    jebp_ubyte *v = in->v;
-    jebp_ubyte *u_end = u + in->uv_width * in->uv_height;
-    jebp__upscale_uv_row(u_prev, u, in->uv_width);
-    jebp__upscale_uv_row(v_prev, v, in->uv_width);
-    u += in->uv_width;
-    v += in->uv_width;
-    jebp_int y_padding = in->width - out->width;
-
-    JEBP__LOOP_IMAGE(out) {
+    for (jebp_int y = 0; y < out->height; y += 2) {
         // Rec. 601 doesn't specify the chroma location for 420, for now I'm
         // assuming it is top-left
         // Even rows
-        jebp_ubyte *up = u_prev;
-        jebp_ubyte *vp = v_prev;
-        for (jebp_int i = 0; i < out->width; i += 1) {
-            pixel->r = JEBP__CONVERT_R(*y, *vp);
-            pixel->g = JEBP__CONVERT_G(*y, *up, *vp);
-            pixel->b = JEBP__CONVERT_B(*y, *up);
-            pixel->a = 255;
-            pixel += 1;
-            y += 1;
-            up += 1;
-            vp += 1;
+        jebp_color_t *row = &out->pixels[y * out->width];
+        uint8_t *y_row = &in->y[y * in->width];
+        for (jebp_int x = 0; x < out->width; x += 1) {
+            row[x].r = JEBP__CONVERT_R(y_row[x], v_prev[x]);
+            row[x].g = JEBP__CONVERT_G(y_row[x], u_prev[x], v_prev[x]);
+            row[x].b = JEBP__CONVERT_B(y_row[x], u_prev[x]);
+            row[x].a = 255;
         }
-        y += y_padding;
-        if (pixel == end) {
+
+        if (y + 1 == out->height) {
+            // If the image height is odd, end here
             break;
-        }
-        // Upscale next row
-        if (u == u_end) {
+        } else if (y + 2 == in->height) {
+            // If this is the final row, duplicate the UV rows
             u_next = u_prev;
+            v_next = v_prev;
         } else {
-            jebp__upscale_uv_row(u_next, u, in->uv_width);
-            jebp__upscale_uv_row(v_next, v, in->uv_width);
-            u += in->uv_width;
-            v += in->uv_width;
+            // Upscale next row
+            jebp_int uv_next = (y / 2 + 1) * in->uv_width;
+            jebp__upscale_uv_row(u_next, &in->u[uv_next], in->uv_width);
+            jebp__upscale_uv_row(v_next, &in->v[uv_next], in->uv_width);
         }
 
         // Odd rows
-        up = u_prev;
-        vp = v_prev;
-        jebp_ubyte *un = u_next;
-        jebp_ubyte *vn = v_next;
-        for (jebp_int i = 0; i < out->width; i += 1) {
-            jebp_ubyte u_avg = (*(up++) + *(un++)) / 2;
-            jebp_ubyte v_avg = (*(vp++) + *(vn++)) / 2;
-            pixel->r = JEBP__CONVERT_R(*y, v_avg);
-            pixel->g = JEBP__CONVERT_G(*y, u_avg, v_avg);
-            pixel->b = JEBP__CONVERT_B(*y, u_avg);
-            pixel->a = 255;
-            pixel += 1;
-            y += 1;
+        row = &out->pixels[(y + 1) * out->width];
+        y_row = &in->y[(y + 1) * in->width];
+        for (jebp_int x = 0; x < out->width; x += 1) {
+            jebp_ubyte u_avg = JEBP__AVG(u_prev[x], u_next[x]);
+            jebp_ubyte v_avg = JEBP__AVG(v_prev[x], v_next[x]);
+            row[x].r = JEBP__CONVERT_R(y_row[x], v_avg);
+            row[x].g = JEBP__CONVERT_G(y_row[x], u_avg, v_avg);
+            row[x].b = JEBP__CONVERT_B(y_row[x], u_avg);
+            row[x].a = 255;
         }
         // Swap buffers
         jebp_ubyte *tmp;
