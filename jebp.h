@@ -1462,16 +1462,6 @@ static void jebp__uv_pred_fill(jebp_ubyte *pred, jebp_int stride,
     }
 }
 
-static void jebp__uv_pred_tm(jebp_ubyte *pred, jebp_int stride) {
-    jebp_ubyte *top = &pred[-stride];
-    for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 1) {
-        jebp_ubyte *row = &pred[y * stride];
-        for (jebp_int x = 0; x < JEBP__UV_PIXEL_SIZE; x += 1) {
-            row[x] = JEBP__CLAMP_UBYTE(row[-1] + top[x] - top[-1]);
-        }
-    }
-}
-
 static jebp_int jebp__uv_pred_sum_l(jebp_ubyte *pred, jebp_int stride) {
     jebp_int sum = 0;
     for (jebp_int i = 0; i < JEBP__UV_PIXEL_SIZE; i += 1) {
@@ -1510,6 +1500,16 @@ static void jebp__uv_pred_dc_t(jebp_ubyte *pred, jebp_int stride) {
     jebp__uv_pred_fill(pred, stride, dc);
 }
 
+static void jebp__uv_pred_tm(jebp_ubyte *pred, jebp_int stride) {
+    jebp_ubyte *top = &pred[-stride];
+    for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 1) {
+        jebp_ubyte *row = &pred[y * stride];
+        for (jebp_int x = 0; x < JEBP__UV_PIXEL_SIZE; x += 1) {
+            row[x] = JEBP__CLAMP_UBYTE(row[-1] + top[x] - top[-1]);
+        }
+    }
+}
+
 static void jebp__uv_pred_v(jebp_ubyte *pred, jebp_int stride) {
     jebp_ubyte *top = &pred[-stride];
     for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 1) {
@@ -1528,12 +1528,79 @@ static void jebp__uv_pred_h(jebp_ubyte *pred, jebp_int stride) {
 static void jebp__y_pred_fill(jebp_ubyte *pred, jebp_int stride,
                               jebp_ubyte value) {
     for (jebp_int y = 0; y < JEBP__Y_PIXEL_SIZE; y += 1) {
-        memset(&pred[y * stride], value, JEBP__Y_PIXEL_SIZE);
+        jebp_ubyte *row = &pred[y * stride];
+        memset(row, value, JEBP__Y_PIXEL_SIZE);
+    }
+}
+
+static jebp_int jebp__y_pred_sum_l(jebp_ubyte *pred, jebp_int stride) {
+    jebp_int sum = 0;
+    for (jebp_int i = 0; i < JEBP__Y_PIXEL_SIZE; i += 1) {
+        jebp_ubyte *row = &pred[i * stride];
+        sum += row[-1];
+    }
+    return sum;
+}
+
+static jebp_int jebp__y_pred_sum_t(jebp_ubyte *pred, jebp_int stride) {
+    jebp_int sum = 0;
+    jebp_ubyte *top = &pred[-stride];
+    for (jebp_int i = 0; i < JEBP__Y_PIXEL_SIZE; i += 1) {
+        sum += top[i];
+    }
+    return sum;
+}
+
+static void jebp__y_pred_dc(jebp_ubyte *pred, jebp_int stride) {
+    jebp_int sum =
+        jebp__y_pred_sum_t(pred, stride) + jebp__y_pred_sum_l(pred, stride);
+    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 5);
+    jebp__y_pred_fill(pred, stride, dc);
+}
+
+static void jebp__y_pred_dc_l(jebp_ubyte *pred, jebp_int stride) {
+    jebp_int sum = jebp__y_pred_sum_l(pred, stride);
+    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 4);
+    jebp__y_pred_fill(pred, stride, dc);
+}
+
+static void jebp__y_pred_dc_t(jebp_ubyte *pred, jebp_int stride) {
+    jebp_int sum = jebp__y_pred_sum_t(pred, stride);
+    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 4);
+    jebp__y_pred_fill(pred, stride, dc);
+}
+
+static void jebp__y_pred_tm(jebp_ubyte *pred, jebp_int stride) {
+    jebp_ubyte *top = &pred[-stride];
+    for (jebp_int y = 0; y < JEBP__Y_PIXEL_SIZE; y += 1) {
+        jebp_ubyte *row = &pred[y * stride];
+        for (jebp_int x = 0; x < JEBP__Y_PIXEL_SIZE; x += 1) {
+            row[x] = JEBP__CLAMP_UBYTE(row[-1] + top[x] - top[-1]);
+        }
+    }
+}
+
+static void jebp__y_pred_v(jebp_ubyte *pred, jebp_int stride) {
+    jebp_ubyte *top = &pred[-stride];
+    for (jebp_int y = 0; y < JEBP__Y_PIXEL_SIZE; y += 1) {
+        jebp_ubyte *row = &pred[y * stride];
+        memcpy(row, top, JEBP__Y_PIXEL_SIZE);
+    }
+}
+
+static void jebp__y_pred_h(jebp_ubyte *pred, jebp_int stride) {
+    for (jebp_int y = 0; y < JEBP__Y_PIXEL_SIZE; y += 1) {
+        jebp_ubyte *row = &pred[y * stride];
+        memset(row, row[-1], JEBP__Y_PIXEL_SIZE);
     }
 }
 
 static const jebp__vp8_pred_t jebp__uv_preds[JEBP__NB_UV_PRED_TYPES] = {
     jebp__uv_pred_dc, jebp__uv_pred_tm, jebp__uv_pred_v, jebp__uv_pred_h};
+
+// Using 'nb. UV pred types' since we don't include B-pred in this list
+static const jebp__vp8_pred_t jebp__y_preds[JEBP__NB_UV_PRED_TYPES] = {
+    jebp__y_pred_dc, jebp__y_pred_tm, jebp__y_pred_v, jebp__y_pred_h};
 
 /**
  * Macroblock data
@@ -1567,6 +1634,18 @@ static jebp__vp8_pred_t jebp__get_uv_pred(jebp__macro_header_t *hdr,
         }
     }
     return jebp__uv_preds[pred];
+}
+
+static jebp__vp8_pred_t jebp__get_y_pred(jebp__macro_header_t *hdr,
+                                         jebp__vp8_pred_type_t pred) {
+    if (pred == JEBP__VP8_PRED_DC) {
+        if (hdr->x > 0 && hdr->y == 0) {
+            return jebp__y_pred_dc_l;
+        } else if (hdr->x == 0 && hdr->y > 0) {
+            return jebp__y_pred_dc_t;
+        }
+    }
+    return jebp__y_preds[pred];
 }
 
 JEBP__INLINE jebp_short jebp__read_token_extrabits(jebp__token_t token,
@@ -1692,8 +1771,14 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
     jebp_short dct[JEBP__NB_BLOCK_COEFFS];
     jebp_short wht[JEBP__NB_BLOCK_COEFFS];
     jebp__block_type_t y_type = JEBP__BLOCK_Y0;
+    jebp_ubyte *image_y =
+        &image->y[(hdr->y * image->stride + hdr->x) * JEBP__Y_PIXEL_SIZE];
+
     if (hdr->y_pred != JEBP__VP8_PRED_B) {
         y_type = JEBP__BLOCK_Y1;
+        jebp__vp8_pred_t y_pred = jebp__get_y_pred(hdr, hdr->y_pred);
+        y_pred(image_y, image->stride);
+
         jebp_int complex =
             JEBP__GET_Y2_NONZERO(state.top) + JEBP__GET_Y2_NONZERO(state.left);
         jebp_int nonzero =
@@ -1701,12 +1786,10 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
         JEBP__SET_BIT(state.top->y2_flags, JEBP__Y_NONZERO, nonzero);
         JEBP__SET_BIT(state.left->y2_flags, JEBP__Y_NONZERO, nonzero);
         jebp__invert_wht(wht);
+    } else {
+        // TODO: implement proper B prediction
+        jebp__y_pred_fill(image_y, image->stride, 128);
     }
-
-    jebp_ubyte *image_y =
-        &image->y[(hdr->y * image->stride + hdr->x) * JEBP__Y_PIXEL_SIZE];
-    // TODO: implement proper Y prediction
-    jebp__y_pred_fill(image_y, image->stride, 128);
 
     for (jebp_int y = 0; y < JEBP__Y_SIZE; y += 1) {
         jebp_int row = y * image->stride;
@@ -1732,10 +1815,8 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
     jebp_int uv_offset =
         (hdr->y * image->uv_stride + hdr->x) * JEBP__UV_PIXEL_SIZE;
     jebp_ubyte *image_u = &image->u[uv_offset];
-    jebp__uv_pred_fill(image_u, image->uv_stride, 128);
     uv_pred(image_u, image->uv_stride);
     jebp_ubyte *image_v = &image->v[uv_offset];
-    jebp__uv_pred_fill(image_v, image->uv_stride, 128);
     uv_pred(image_v, image->uv_stride);
 
     for (jebp_int y = 0; y < JEBP__UV_SIZE; y += 1) {
