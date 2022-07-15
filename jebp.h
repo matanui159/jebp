@@ -1279,13 +1279,11 @@ typedef enum jebp__uv_flags_t {
 } jebp__uv_flags_t;
 
 typedef enum jebp__vp8_pred_type_t {
-    JEBP__VP8_PRED_DC,   // Predict DC only
-    JEBP__VP8_PRED_TM,   // "True-Motion"
-    JEBP__VP8_PRED_V,    // Vertical
-    JEBP__VP8_PRED_H,    // Horizontal
-    JEBP__VP8_PRED_DC_L, // Left-only DC
-    JEBP__VP8_PRED_DC_T, // Top-only DC
-    JEBP__VP8_PRED_B,    // Per-block prediction
+    JEBP__VP8_PRED_DC, // Predict DC only
+    JEBP__VP8_PRED_TM, // "True-Motion"
+    JEBP__VP8_PRED_V,  // Vertical
+    JEBP__VP8_PRED_H,  // Horizontal
+    JEBP__VP8_PRED_B,  // Per-block prediction
     JEBP__NB_Y_PRED_TYPES,
     JEBP__NB_UV_PRED_TYPES = JEBP__VP8_PRED_B
 } jebp__vp8_pred_type_t;
@@ -1338,22 +1336,6 @@ static const jebp_byte
 static const jebp_ubyte
     jebp__uv_pred_probs[JEBP__NB_PROBS(JEBP__NB_UV_PRED_TYPES)];
 
-static jebp__vp8_pred_type_t jebp__read_vp8_pred(jebp__macro_header_t *hdr,
-                                                 jebp__bec_reader_t *bec,
-                                                 const jebp_byte *tree,
-                                                 const jebp_ubyte *probs,
-                                                 jebp_error_t *err) {
-    jebp__vp8_pred_type_t pred = jebp__read_tree(bec, tree, probs, err);
-    if (pred == JEBP__VP8_PRED_DC) {
-        if (hdr->x > 0 && hdr->y == 0) {
-            return JEBP__VP8_PRED_DC_L;
-        } else if (hdr->x == 0 && hdr->y > 0) {
-            return JEBP__VP8_PRED_DC_T;
-        }
-    }
-    return pred;
-}
-
 static jebp_error_t jebp__read_macro_header(jebp__macro_header_t *hdr,
                                             jebp__macro_state_pair_t state,
                                             jebp__bec_reader_t *bec) {
@@ -1365,8 +1347,8 @@ static jebp_error_t jebp__read_macro_header(jebp__macro_header_t *hdr,
     }
     hdr->segment = &hdr->vp8->segments[segment];
 
-    hdr->y_pred = jebp__read_vp8_pred(hdr, bec, jebp__y_pred_tree,
-                                      jebp__y_pred_probs, &err);
+    hdr->y_pred =
+        jebp__read_tree(bec, jebp__y_pred_tree, jebp__y_pred_probs, &err);
     jebp__b_pred_type_t b_top[JEBP__Y_SIZE];
     jebp__b_pred_type_t b_left[JEBP__Y_SIZE];
     for (jebp_int i = 0; i < JEBP__Y_SIZE; i += 1) {
@@ -1377,11 +1359,6 @@ static jebp_error_t jebp__read_macro_header(jebp__macro_header_t *hdr,
             // subblock)
             b_top[i] = state.top->y_flags[i] & JEBP__B_PRED_MASK;
             b_left[i] = state.left->y_flags[i] & JEBP__B_PRED_MASK;
-        } else if (hdr->y_pred >= JEBP__VP8_PRED_DC_L) {
-            // Special case: DC L/T should be treated as a usual DC prediction
-            //               in this situation
-            b_top[i] = JEBP__B_PRED_DC;
-            b_left[i] = JEBP__B_PRED_DC;
         } else {
             // If we're not decoding B prediction subblocks we instead use this
             // iteration to copy over the fake subblock modes used for the
@@ -1408,8 +1385,8 @@ static jebp_error_t jebp__read_macro_header(jebp__macro_header_t *hdr,
         JEBP__SET_MASK(state.top->y_flags[i], JEBP__B_PRED_MASK, b_top[i]);
         JEBP__SET_MASK(state.left->y_flags[i], JEBP__B_PRED_MASK, b_left[i]);
     }
-    hdr->uv_pred = jebp__read_vp8_pred(hdr, bec, jebp__uv_pred_tree,
-                                       jebp__uv_pred_probs, &err);
+    hdr->uv_pred =
+        jebp__read_tree(bec, jebp__uv_pred_tree, jebp__uv_pred_probs, &err);
     return err;
 }
 
@@ -1520,6 +1497,19 @@ static void jebp__uv_pred_dc(jebp_ubyte *pred, jebp_int stride) {
     jebp__uv_pred_fill(pred, stride, dc);
 }
 
+// For handling DC prediction on top and left macroblocks
+static void jebp__uv_pred_dc_l(jebp_ubyte *pred, jebp_int stride) {
+    jebp_int sum = jebp__uv_pred_sum_l(pred, stride);
+    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 3);
+    jebp__uv_pred_fill(pred, stride, dc);
+}
+
+static void jebp__uv_pred_dc_t(jebp_ubyte *pred, jebp_int stride) {
+    jebp_int sum = jebp__uv_pred_sum_t(pred, stride);
+    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 3);
+    jebp__uv_pred_fill(pred, stride, dc);
+}
+
 static void jebp__uv_pred_v(jebp_ubyte *pred, jebp_int stride) {
     jebp_ubyte *top = &pred[-stride];
     for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 1) {
@@ -1535,18 +1525,6 @@ static void jebp__uv_pred_h(jebp_ubyte *pred, jebp_int stride) {
     }
 }
 
-static void jebp__uv_pred_dc_l(jebp_ubyte *pred, jebp_int stride) {
-    jebp_int sum = jebp__uv_pred_sum_l(pred, stride);
-    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 3);
-    jebp__uv_pred_fill(pred, stride, dc);
-}
-
-static void jebp__uv_pred_dc_t(jebp_ubyte *pred, jebp_int stride) {
-    jebp_int sum = jebp__uv_pred_sum_t(pred, stride);
-    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 3);
-    jebp__uv_pred_fill(pred, stride, dc);
-}
-
 static void jebp__y_pred_fill(jebp_ubyte *pred, jebp_int stride,
                               jebp_ubyte value) {
     for (jebp_int y = 0; y < JEBP__Y_PIXEL_SIZE; y += 1) {
@@ -1555,13 +1533,19 @@ static void jebp__y_pred_fill(jebp_ubyte *pred, jebp_int stride,
 }
 
 static const jebp__vp8_pred_t jebp__uv_preds[JEBP__NB_UV_PRED_TYPES] = {
-    jebp__uv_pred_dc, jebp__uv_pred_tm,   jebp__uv_pred_v,
-    jebp__uv_pred_h,  jebp__uv_pred_dc_l, jebp__uv_pred_dc_t};
+    jebp__uv_pred_dc, jebp__uv_pred_tm, jebp__uv_pred_v, jebp__uv_pred_h};
 
 /**
  * Macroblock data
  */
 #define JEBP__MAX_TOKEN_EXTRA 11
+#define JEBP__GET_Y_NONZERO(state, index)                                      \
+    (((state)->y_flags[index] & JEBP__Y_NONZERO) != 0)
+#define JEBP__GET_U_NONZERO(state, index)                                      \
+    (((state)->uv_flags[index] & JEBP__U_NONZERO) != 0)
+#define JEBP__GET_V_NONZERO(state, index)                                      \
+    (((state)->uv_flags[index] & JEBP__V_NONZERO) != 0)
+#define JEBP__GET_Y2_NONZERO(state) (((state)->y2_flags & JEBP__Y_NONZERO) != 0)
 
 typedef struct jebp__token_extra_t {
     jebp_byte offset;
@@ -1572,6 +1556,18 @@ static const jebp_byte jebp__coeff_bands[JEBP__NB_BLOCK_COEFFS];
 static const jebp_byte jebp__coeff_order[JEBP__NB_BLOCK_COEFFS];
 static const jebp_byte jebp__token_tree[JEBP__NB_TREE(JEBP__NB_TOKENS - 1)];
 static const jebp__token_extra_t jebp__token_extra[JEBP__NB_EXTRA_TOKENS];
+
+static jebp__vp8_pred_t jebp__get_uv_pred(jebp__macro_header_t *hdr,
+                                          jebp__vp8_pred_type_t pred) {
+    if (pred == JEBP__VP8_PRED_DC) {
+        if (hdr->x > 0 && hdr->y == 0) {
+            return jebp__uv_pred_dc_l;
+        } else if (hdr->x == 0 && hdr->y > 0) {
+            return jebp__uv_pred_dc_t;
+        }
+    }
+    return jebp__uv_preds[pred];
+}
 
 JEBP__INLINE jebp_short jebp__read_token_extrabits(jebp__token_t token,
                                                    jebp__bec_reader_t *bec,
@@ -1676,26 +1672,6 @@ static jebp_int jebp__read_dct(jebp__macro_header_t *hdr, jebp_short *dct,
     return 1;
 }
 
-// TODO: maybe these should be macros??
-JEBP__INLINE jebp_int jebp__get_y_nonzero(jebp__macro_state_t *state,
-                                          jebp_int index) {
-    return (state->y_flags[index] & JEBP__Y_NONZERO) != 0;
-}
-
-JEBP__INLINE jebp_int jebp__get_u_nonzero(jebp__macro_state_t *state,
-                                          jebp_int index) {
-    return (state->uv_flags[index] & JEBP__U_NONZERO) != 0;
-}
-
-JEBP__INLINE jebp_int jebp__get_v_nonzero(jebp__macro_state_t *state,
-                                          jebp_int index) {
-    return (state->uv_flags[index] & JEBP__V_NONZERO) != 0;
-}
-
-JEBP__INLINE jebp_int jebp__get_y2_nonzero(jebp__macro_state_t *state) {
-    return (state->y2_flags & JEBP__Y_NONZERO) != 0;
-}
-
 static void jebp__sum_pred_dct(jebp_ubyte *pred, jebp_int stride,
                                jebp_short *dct) {
     for (jebp_int i = 0; i < JEBP__BLOCK_SIZE; i += 1) {
@@ -1719,7 +1695,7 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
     if (hdr->y_pred != JEBP__VP8_PRED_B) {
         y_type = JEBP__BLOCK_Y1;
         jebp_int complex =
-            jebp__get_y2_nonzero(state.top) + jebp__get_y2_nonzero(state.left);
+            JEBP__GET_Y2_NONZERO(state.top) + JEBP__GET_Y2_NONZERO(state.left);
         jebp_int nonzero =
             jebp__read_dct(hdr, wht, JEBP__BLOCK_Y2, complex, bec, &err);
         JEBP__SET_BIT(state.top->y2_flags, JEBP__Y_NONZERO, nonzero);
@@ -1736,8 +1712,8 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
         jebp_int row = y * image->stride;
         for (jebp_int x = 0; x < JEBP__Y_SIZE; x += 1) {
             jebp_ubyte *pred = &image_y[(row + x) * JEBP__BLOCK_SIZE];
-            jebp_int complex = jebp__get_y_nonzero(state.top, x) +
-                               jebp__get_y_nonzero(state.left, y);
+            jebp_int complex = JEBP__GET_Y_NONZERO(state.top, x) +
+                               JEBP__GET_Y_NONZERO(state.left, y);
             jebp_int nonzero =
                 jebp__read_dct(hdr, dct, y_type, complex, bec, &err);
             JEBP__SET_BIT(state.top->y_flags[x], JEBP__Y_NONZERO, nonzero);
@@ -1752,7 +1728,7 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
         }
     }
 
-    jebp__vp8_pred_t uv_pred = jebp__uv_preds[hdr->uv_pred];
+    jebp__vp8_pred_t uv_pred = jebp__get_uv_pred(hdr, hdr->uv_pred);
     jebp_int uv_offset =
         (hdr->y * image->uv_stride + hdr->x) * JEBP__UV_PIXEL_SIZE;
     jebp_ubyte *image_u = &image->u[uv_offset];
@@ -1766,8 +1742,8 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
         jebp_int row = y * image->uv_stride;
         for (jebp_int x = 0; x < JEBP__UV_SIZE; x += 1) {
             jebp_ubyte *pred = &image_u[(row + x) * JEBP__BLOCK_SIZE];
-            jebp_int complex = jebp__get_u_nonzero(state.top, x) +
-                               jebp__get_u_nonzero(state.left, y);
+            jebp_int complex = JEBP__GET_U_NONZERO(state.top, x) +
+                               JEBP__GET_U_NONZERO(state.left, y);
             jebp_int nonzero =
                 jebp__read_dct(hdr, dct, JEBP__BLOCK_UV, complex, bec, &err);
             JEBP__SET_BIT(state.top->uv_flags[x], JEBP__U_NONZERO, nonzero);
@@ -1780,8 +1756,8 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
         jebp_int row = y * image->uv_stride;
         for (jebp_int x = 0; x < JEBP__UV_SIZE; x += 1) {
             jebp_ubyte *pred = &image_v[(row + x) * JEBP__BLOCK_SIZE];
-            jebp_int complex = jebp__get_v_nonzero(state.top, x) +
-                               jebp__get_v_nonzero(state.left, y);
+            jebp_int complex = JEBP__GET_V_NONZERO(state.top, x) +
+                               JEBP__GET_V_NONZERO(state.left, y);
             jebp_int nonzero =
                 jebp__read_dct(hdr, dct, JEBP__BLOCK_UV, complex, bec, &err);
             JEBP__SET_BIT(state.top->uv_flags[x], JEBP__V_NONZERO, nonzero);
