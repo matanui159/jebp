@@ -1283,11 +1283,13 @@ typedef enum jebp__uv_flags_t {
 } jebp__uv_flags_t;
 
 typedef enum jebp__vp8_pred_type_t {
-    JEBP__VP8_PRED_DC, // Predict DC only
-    JEBP__VP8_PRED_TM, // "True-Motion"
-    JEBP__VP8_PRED_V,  // Vertical
-    JEBP__VP8_PRED_H,  // Horizontal
-    JEBP__VP8_PRED_B,  // Per-block prediction
+    JEBP__VP8_PRED_DC,   // Predict DC only
+    JEBP__VP8_PRED_TM,   // "True-Motion"
+    JEBP__VP8_PRED_V,    // Vertical
+    JEBP__VP8_PRED_H,    // Horizontal
+    JEBP__VP8_PRED_DC_L, // Left-only DC
+    JEBP__VP8_PRED_DC_T, // Top-only DC
+    JEBP__VP8_PRED_B,    // Per-block prediction
     JEBP__NB_Y_PRED_TYPES,
     JEBP__NB_UV_PRED_TYPES = JEBP__VP8_PRED_B
 } jebp__vp8_pred_type_t;
@@ -1454,11 +1456,13 @@ static void jebp__invert_wht(jebp_short *wht) {
 }
 
 /**
- * VP8 prediction
+ * VP8 predictions
  */
 typedef void (*jebp__vp8_pred_t)(jebp_ubyte *pred, jebp_int stride);
 typedef void (*jebp__b_pred_t)(jebp_ubyte *pred, jebp_int stride,
                                jebp_ubyte *tr);
+
+// UV predictions
 
 static void jebp__uv_pred_fill(jebp_ubyte *pred, jebp_int stride,
                                jebp_ubyte value) {
@@ -1531,6 +1535,8 @@ static void jebp__uv_pred_h(jebp_ubyte *pred, jebp_int stride) {
     }
 }
 
+// Y predictions
+
 static void jebp__y_pred_fill(jebp_ubyte *pred, jebp_int stride,
                               jebp_ubyte value) {
     for (jebp_int y = 0; y < JEBP__Y_PIXEL_SIZE; y += 1) {
@@ -1601,12 +1607,183 @@ static void jebp__y_pred_h(jebp_ubyte *pred, jebp_int stride) {
     }
 }
 
+// B predictions
+
+static void jebp__b_pred_fill(jebp_ubyte *pred, jebp_int stride,
+                              jebp_ubyte value) {
+    memset(&pred[0 * stride], value, JEBP__BLOCK_SIZE);
+    memset(&pred[1 * stride], value, JEBP__BLOCK_SIZE);
+    memset(&pred[2 * stride], value, JEBP__BLOCK_SIZE);
+    memset(&pred[3 * stride], value, JEBP__BLOCK_SIZE);
+}
+
+static void jebp__b_pred_dc(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
+    (void)tr;
+    jebp_int sum = 0;
+    jebp_ubyte *top = &pred[-stride];
+    sum += top[0] + top[1] + top[2] + top[3];
+    jebp_ubyte *left = &pred[-1];
+    sum += left[0 * stride] + left[1 * stride] + left[2 * stride] +
+           left[3 * stride];
+    jebp_ubyte dc = JEBP__RSHIFT(sum, 3);
+    jebp__b_pred_fill(pred, stride, dc);
+}
+
+static void jebp__b_pred_tm(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
+    (void)tr;
+    jebp_ubyte *top = &pred[-stride];
+    for (jebp_int y = 0; y < JEBP__BLOCK_SIZE; y += 1) {
+        jebp_ubyte *row = &pred[y * stride];
+        row[0] = JEBP__CLAMP_UBYTE(row[-1] + top[0] - top[-1]);
+        row[1] = JEBP__CLAMP_UBYTE(row[-1] + top[1] - top[-1]);
+        row[2] = JEBP__CLAMP_UBYTE(row[-1] + top[2] - top[-1]);
+        row[3] = JEBP__CLAMP_UBYTE(row[-1] + top[3] - top[-1]);
+    }
+}
+
+static void jebp__b_pred_ve(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
+    jebp_ubyte *top = &pred[-stride];
+    jebp_ubyte avg[4];
+    avg[0] = JEBP__RAVG3(top[-1], top[0], top[1]);
+    avg[1] = JEBP__RAVG3(top[0], top[1], top[2]);
+    avg[2] = JEBP__RAVG3(top[1], top[2], top[3]);
+    avg[3] = JEBP__RAVG3(top[2], top[3], tr[0]);
+    memcpy(&pred[0 * stride], avg, JEBP__BLOCK_SIZE);
+    memcpy(&pred[1 * stride], avg, JEBP__BLOCK_SIZE);
+    memcpy(&pred[2 * stride], avg, JEBP__BLOCK_SIZE);
+    memcpy(&pred[3 * stride], avg, JEBP__BLOCK_SIZE);
+}
+
+static void jebp__b_pred_he(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
+    (void)tr;
+    jebp_ubyte *top = &pred[-stride];
+    jebp_ubyte *r0 = &pred[0 * stride];
+    jebp_ubyte *r1 = &pred[1 * stride];
+    jebp_ubyte *r2 = &pred[2 * stride];
+    jebp_ubyte *r3 = &pred[3 * stride];
+    memset(r0, JEBP__RAVG3(top[-1], r0[-1], r1[-1]), JEBP__BLOCK_SIZE);
+    memset(r1, JEBP__RAVG3(r0[-1], r1[-1], r2[-1]), JEBP__BLOCK_SIZE);
+    memset(r2, JEBP__RAVG3(r1[-1], r2[-1], r3[-1]), JEBP__BLOCK_SIZE);
+    memset(r3, JEBP__RAVG3(r2[-1], r3[-1], r3[-1]), JEBP__BLOCK_SIZE);
+}
+
+static void jebp__b_pred_ld(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
+    jebp_ubyte *top = &pred[-stride];
+    jebp_ubyte *r0 = &pred[0 * stride];
+    jebp_ubyte *r1 = &pred[1 * stride];
+    jebp_ubyte *r2 = &pred[2 * stride];
+    jebp_ubyte *r3 = &pred[3 * stride];
+    r0[0] = JEBP__RAVG3(top[0], top[1], top[2]);
+    r0[1] = r1[0] = JEBP__RAVG3(top[1], top[2], top[3]);
+    r0[2] = r1[1] = r2[0] = JEBP__RAVG3(top[2], top[3], tr[0]);
+    r0[3] = r1[2] = r2[1] = r3[0] = JEBP__RAVG3(top[3], tr[0], tr[1]);
+    r1[3] = r2[2] = r3[1] = JEBP__RAVG3(tr[0], tr[1], tr[2]);
+    r2[3] = r3[2] = JEBP__RAVG3(tr[1], tr[2], tr[3]);
+    r3[3] = JEBP__RAVG3(tr[2], tr[3], tr[3]);
+}
+
+static void jebp__b_pred_rd(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
+    (void)tr;
+    jebp_ubyte *top = &pred[-stride];
+    jebp_ubyte *r0 = &pred[0 * stride];
+    jebp_ubyte *r1 = &pred[1 * stride];
+    jebp_ubyte *r2 = &pred[2 * stride];
+    jebp_ubyte *r3 = &pred[3 * stride];
+    r3[0] = JEBP__RAVG3(r3[-1], r2[-1], r1[-1]);
+    r2[0] = r3[1] = JEBP__RAVG3(r2[-1], r1[-1], r0[-1]);
+    r1[0] = r2[1] = r3[2] = JEBP__RAVG3(r1[-1], r0[-1], top[-1]);
+    r0[0] = r1[1] = r2[2] = r3[3] = JEBP__RAVG3(r0[-1], top[-1], top[0]);
+    r0[1] = r1[2] = r2[3] = JEBP__RAVG3(top[-1], top[0], top[1]);
+    r0[2] = r1[3] = JEBP__RAVG3(top[0], top[1], top[2]);
+    r0[3] = JEBP__RAVG3(top[1], top[2], top[3]);
+}
+
+static void jebp__b_pred_vr(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
+    (void)tr;
+    jebp_ubyte *top = &pred[-stride];
+    jebp_ubyte *r0 = &pred[0 * stride];
+    jebp_ubyte *r1 = &pred[1 * stride];
+    jebp_ubyte *r2 = &pred[2 * stride];
+    jebp_ubyte *r3 = &pred[3 * stride];
+    r3[0] = JEBP__RAVG3(r2[-1], r1[-1], r0[-1]);
+    r2[0] = JEBP__RAVG3(r1[-1], r0[-1], top[-1]);
+    r1[0] = r3[1] = JEBP__RAVG3(r0[-1], top[-1], top[0]);
+    r0[0] = r2[1] = JEBP__RAVG(top[-1], top[0]);
+    r1[1] = r3[2] = JEBP__RAVG3(top[-1], top[0], top[1]);
+    r0[1] = r2[2] = JEBP__RAVG(top[0], top[1]);
+    r1[2] = r3[3] = JEBP__RAVG3(top[0], top[1], top[2]);
+    r0[2] = r2[3] = JEBP__RAVG(top[1], top[2]);
+    r1[3] = JEBP__RAVG3(top[1], top[2], top[3]);
+    r0[3] = JEBP__RAVG(top[2], top[3]);
+}
+
+static void jebp__b_pred_vl(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
+    jebp_ubyte *top = &pred[-stride];
+    jebp_ubyte *r0 = &pred[0 * stride];
+    jebp_ubyte *r1 = &pred[1 * stride];
+    jebp_ubyte *r2 = &pred[2 * stride];
+    jebp_ubyte *r3 = &pred[3 * stride];
+    r0[0] = JEBP__RAVG(top[0], top[1]);
+    r1[0] = JEBP__RAVG3(top[0], top[1], top[2]);
+    r0[1] = r2[0] = JEBP__RAVG(top[1], top[2]);
+    r1[1] = r3[0] = JEBP__RAVG3(top[1], top[2], top[3]);
+    r0[2] = r2[1] = JEBP__RAVG(top[2], top[3]);
+    r1[2] = r3[1] = JEBP__RAVG3(top[2], top[3], tr[0]);
+    r0[3] = r2[2] = JEBP__RAVG(top[3], tr[0]);
+    r1[3] = r3[2] = JEBP__RAVG3(top[3], tr[0], tr[1]);
+    // These last two do not follow the same pattern
+    r2[3] = JEBP__RAVG3(tr[0], tr[1], tr[2]);
+    r3[3] = JEBP__RAVG3(tr[1], tr[2], tr[3]);
+}
+
+static void jebp__b_pred_hd(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
+    (void)tr;
+    jebp_ubyte *top = &pred[-stride];
+    jebp_ubyte *r0 = &pred[0 * stride];
+    jebp_ubyte *r1 = &pred[1 * stride];
+    jebp_ubyte *r2 = &pred[2 * stride];
+    jebp_ubyte *r3 = &pred[3 * stride];
+    r3[0] = JEBP__RAVG(r3[-1], r2[-1]);
+    r3[1] = JEBP__RAVG3(r3[-1], r2[-1], r1[-1]);
+    r2[0] = r3[2] = JEBP__RAVG(r2[-1], r1[-1]);
+    r2[1] = r3[3] = JEBP__RAVG3(r2[-1], r1[-1], r0[-1]);
+    r1[0] = r2[2] = JEBP__RAVG(r1[-1], r0[-1]);
+    r1[1] = r2[3] = JEBP__RAVG3(r1[-1], r0[-1], top[-1]);
+    r0[0] = r1[2] = JEBP__RAVG(r0[-1], top[-1]);
+    r0[1] = r1[3] = JEBP__RAVG3(r0[-1], top[-1], top[0]);
+    r0[2] = JEBP__RAVG3(top[-1], top[0], top[1]);
+    r0[3] = JEBP__RAVG3(top[1], top[2], top[3]);
+}
+
+static void jebp__b_pred_hu(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
+    (void)tr;
+    jebp_ubyte *r0 = &pred[0 * stride];
+    jebp_ubyte *r1 = &pred[1 * stride];
+    jebp_ubyte *r2 = &pred[2 * stride];
+    jebp_ubyte *r3 = &pred[3 * stride];
+    r0[0] = JEBP__RAVG(r0[-1], r1[-1]);
+    r0[1] = JEBP__RAVG3(r0[-1], r1[-1], r2[-1]);
+    r1[0] = r0[2] = JEBP__RAVG(r1[-1], r2[-1]);
+    r1[1] = r0[3] = JEBP__RAVG3(r1[-1], r2[-1], r3[-1]);
+    r2[0] = r1[2] = JEBP__RAVG(r2[-1], r3[-1]);
+    r2[1] = r1[3] = JEBP__RAVG3(r2[-1], r3[-1], r3[-1]);
+    // The rest cannot be predicted well
+    r2[2] = r2[3] = r3[0] = r3[1] = r3[2] = r3[3] = r3[-1];
+}
+
 static const jebp__vp8_pred_t jebp__uv_preds[JEBP__NB_UV_PRED_TYPES] = {
-    jebp__uv_pred_dc, jebp__uv_pred_tm, jebp__uv_pred_v, jebp__uv_pred_h};
+    jebp__uv_pred_dc, jebp__uv_pred_tm,   jebp__uv_pred_v,
+    jebp__uv_pred_h,  jebp__uv_pred_dc_l, jebp__uv_pred_dc_t};
 
 // Using 'nb. UV pred types' since we don't include B-pred in this list
 static const jebp__vp8_pred_t jebp__y_preds[JEBP__NB_UV_PRED_TYPES] = {
-    jebp__y_pred_dc, jebp__y_pred_tm, jebp__y_pred_v, jebp__y_pred_h};
+    jebp__y_pred_dc, jebp__y_pred_tm,   jebp__y_pred_v,
+    jebp__y_pred_h,  jebp__y_pred_dc_l, jebp__y_pred_dc_t};
+
+static const jebp__b_pred_t jebp__b_preds[JEBP__NB_B_PRED_TYPES] = {
+    jebp__b_pred_dc, jebp__b_pred_tm, jebp__b_pred_ve, jebp__b_pred_he,
+    jebp__b_pred_ld, jebp__b_pred_rd, jebp__b_pred_vr, jebp__b_pred_vl,
+    jebp__b_pred_hd, jebp__b_pred_hu};
 
 /**
  * Macroblock data
@@ -1630,28 +1807,16 @@ static const jebp_byte jebp__coeff_order[JEBP__NB_BLOCK_COEFFS];
 static const jebp_byte jebp__token_tree[JEBP__NB_TREE(JEBP__NB_TOKENS - 1)];
 static const jebp__token_extra_t jebp__token_extra[JEBP__NB_EXTRA_TOKENS];
 
-static jebp__vp8_pred_t jebp__get_uv_pred(jebp__macro_header_t *hdr,
-                                          jebp__vp8_pred_type_t pred) {
+static jebp__vp8_pred_type_t jebp__vp8_pred_type(jebp__macro_header_t *hdr,
+                                                 jebp__vp8_pred_type_t pred) {
     if (pred == JEBP__VP8_PRED_DC) {
         if (hdr->x > 0 && hdr->y == 0) {
-            return jebp__uv_pred_dc_l;
+            return JEBP__VP8_PRED_DC_L;
         } else if (hdr->x == 0 && hdr->y > 0) {
-            return jebp__uv_pred_dc_t;
+            return JEBP__VP8_PRED_DC_T;
         }
     }
-    return jebp__uv_preds[pred];
-}
-
-static jebp__vp8_pred_t jebp__get_y_pred(jebp__macro_header_t *hdr,
-                                         jebp__vp8_pred_type_t pred) {
-    if (pred == JEBP__VP8_PRED_DC) {
-        if (hdr->x > 0 && hdr->y == 0) {
-            return jebp__y_pred_dc_l;
-        } else if (hdr->x == 0 && hdr->y > 0) {
-            return jebp__y_pred_dc_t;
-        }
-    }
-    return jebp__y_preds[pred];
+    return pred;
 }
 
 JEBP__INLINE jebp_short jebp__read_token_extrabits(jebp__token_t token,
@@ -1782,7 +1947,8 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
 
     if (hdr->y_pred != JEBP__VP8_PRED_B) {
         y_type = JEBP__BLOCK_Y1;
-        jebp__vp8_pred_t y_pred = jebp__get_y_pred(hdr, hdr->y_pred);
+        jebp__vp8_pred_t y_pred =
+            jebp__y_preds[jebp__vp8_pred_type(hdr, hdr->y_pred)];
         y_pred(image_y, image->stride);
 
         jebp_int complex =
@@ -1792,32 +1958,51 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
         JEBP__SET_BIT(state.top->y2_flags, JEBP__Y_NONZERO, nonzero);
         JEBP__SET_BIT(state.left->y2_flags, JEBP__Y_NONZERO, nonzero);
         jebp__invert_wht(wht);
-    } else {
-        // TODO: implement proper B prediction
-        jebp__y_pred_fill(image_y, image->stride, 128);
     }
 
+    jebp_int macro_width = image->width / JEBP__Y_PIXEL_SIZE;
     for (jebp_int y = 0; y < JEBP__Y_SIZE; y += 1) {
         jebp_int row = y * image->stride;
         for (jebp_int x = 0; x < JEBP__Y_SIZE; x += 1) {
+            jebp_int i = y * JEBP__Y_SIZE + x;
             jebp_ubyte *pred = &image_y[(row + x) * JEBP__BLOCK_SIZE];
+            if (hdr->y_pred == JEBP__VP8_PRED_B) {
+                jebp_ubyte *tr;
+                jebp_ubyte tr_copy[JEBP__BLOCK_SIZE];
+                if (x < JEBP__Y_SIZE - 1) {
+                    // 0th, 1st and 2nd blocks can just reference the top-right
+                    // portion
+                    tr = &pred[JEBP__BLOCK_SIZE - image->stride];
+                } else if (hdr->x < macro_width - 1) {
+                    // Blocks on the right edge share TR with the top-right
+                    // block
+                    tr = &image_y[JEBP__Y_PIXEL_SIZE - image->stride];
+                } else {
+                    // Otherwise we duplicate the right-most pixel
+                    memset(tr_copy,
+                           image_y[JEBP__Y_PIXEL_SIZE - 1 - image->stride],
+                           JEBP__BLOCK_SIZE);
+                    tr = tr_copy;
+                }
+                jebp__b_pred_t b_pred = jebp__b_preds[hdr->b_preds[i]];
+                b_pred(pred, image->stride, tr);
+            } else {
+                dct[0] = wht[i];
+            }
+
             jebp_int complex = JEBP__GET_Y_NONZERO(state.top, x) +
                                JEBP__GET_Y_NONZERO(state.left, y);
             jebp_int nonzero =
                 jebp__read_dct(hdr, dct, y_type, complex, bec, &err);
             JEBP__SET_BIT(state.top->y_flags[x], JEBP__Y_NONZERO, nonzero);
             JEBP__SET_BIT(state.left->y_flags[y], JEBP__Y_NONZERO, nonzero);
-
-            if (y_type == JEBP__BLOCK_Y1) {
-                jebp_int i = y * JEBP__Y_SIZE + x;
-                dct[0] = wht[i];
-            }
             jebp__invert_dct(dct);
             jebp__sum_pred_dct(pred, image->stride, dct);
         }
     }
 
-    jebp__vp8_pred_t uv_pred = jebp__get_uv_pred(hdr, hdr->uv_pred);
+    jebp__vp8_pred_t uv_pred =
+        jebp__uv_preds[jebp__vp8_pred_type(hdr, hdr->uv_pred)];
     jebp_int uv_offset =
         (hdr->y * image->uv_stride + hdr->x) * JEBP__UV_PIXEL_SIZE;
     jebp_ubyte *image_u = &image->u[uv_offset];
