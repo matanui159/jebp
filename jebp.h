@@ -1413,9 +1413,9 @@ static void jebp__invert_dct(jebp_short *dct) {
         jebp_int t2 = JEBP__DCT_SIN(col[4]) - JEBP__DCT_COS(col[12]);
         jebp_int t3 = JEBP__DCT_COS(col[4]) + JEBP__DCT_SIN(col[12]);
         col[0] = t0 + t3;
-        col[4] = t0 - t3;
-        col[8] = t1 + t2;
-        col[12] = t1 - t2;
+        col[4] = t1 + t2;
+        col[8] = t1 - t2;
+        col[12] = t0 - t3;
     }
     for (jebp_int i = 0; i < JEBP__BLOCK_SIZE; i += 1) {
         jebp_short *row = &dct[i * JEBP__BLOCK_SIZE];
@@ -1424,9 +1424,9 @@ static void jebp__invert_dct(jebp_short *dct) {
         jebp_int t2 = JEBP__DCT_SIN(row[1]) - JEBP__DCT_COS(row[3]);
         jebp_int t3 = JEBP__DCT_COS(row[1]) + JEBP__DCT_SIN(row[3]);
         row[0] = (t0 + t3 + 4) >> 3;
-        row[1] = (t0 - t3 + 4) >> 3;
-        row[2] = (t1 + t2 + 4) >> 3;
-        row[3] = (t1 - t2 + 4) >> 3;
+        row[1] = (t1 + t2 + 4) >> 3;
+        row[2] = (t1 - t2 + 4) >> 3;
+        row[3] = (t0 - t3 + 4) >> 3;
     }
 }
 
@@ -1752,7 +1752,7 @@ static void jebp__b_pred_hd(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
     r0[0] = r1[2] = JEBP__RAVG(r0[-1], top[-1]);
     r0[1] = r1[3] = JEBP__RAVG3(r0[-1], top[-1], top[0]);
     r0[2] = JEBP__RAVG3(top[-1], top[0], top[1]);
-    r0[3] = JEBP__RAVG3(top[1], top[2], top[3]);
+    r0[3] = JEBP__RAVG3(top[0], top[1], top[2]);
 }
 
 static void jebp__b_pred_hu(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
@@ -1865,8 +1865,10 @@ static jebp_int jebp__read_dct(jebp__macro_header_t *hdr, jebp_short *dct,
                                 hdr->vp8->token_probs[type];
     jebp_ubyte *probs = token_probs[jebp__coeff_bands[coeff]][complex];
     if (!jebp__read_bool(bec, probs[0], err)) {
-        // First token is EOB
-        JEBP__CLEAR(dct, JEBP__NB_BLOCK_COEFFS * sizeof(jebp_short));
+        // First token is EOB, making sure not to clear the first one if the
+        // type is Y1
+        JEBP__CLEAR(&dct[coeff],
+                    (JEBP__NB_BLOCK_COEFFS - coeff) * sizeof(jebp_short));
         return 0;
     }
 
@@ -1947,9 +1949,8 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
 
     if (hdr->y_pred != JEBP__VP8_PRED_B) {
         y_type = JEBP__BLOCK_Y1;
-        jebp__vp8_pred_t y_pred =
-            jebp__y_preds[jebp__vp8_pred_type(hdr, hdr->y_pred)];
-        y_pred(image_y, image->stride);
+        jebp__y_preds[jebp__vp8_pred_type(hdr, hdr->y_pred)](image_y,
+                                                             image->stride);
 
         jebp_int complex =
             JEBP__GET_Y2_NONZERO(state.top) + JEBP__GET_Y2_NONZERO(state.left);
@@ -1984,8 +1985,7 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
                            JEBP__BLOCK_SIZE);
                     tr = tr_copy;
                 }
-                jebp__b_pred_t b_pred = jebp__b_preds[hdr->b_preds[i]];
-                b_pred(pred, image->stride, tr);
+                jebp__b_preds[hdr->b_preds[i]](pred, image->stride, tr);
             } else {
                 dct[0] = wht[i];
             }
