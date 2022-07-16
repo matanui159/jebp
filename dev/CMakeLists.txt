@@ -29,6 +29,11 @@ endfunction()
 if(BUILD_TESTING)
     add_executable(jebptest jebptest.c)
     target_link_libraries(jebptest PRIVATE ${link_options})
+    # TODO: adding these for now so I don't get any regressions, but these will
+    #       need to change when I add the deblocking filters
+    add_test_image(lossy_tree lossy/tree.webp 1024x772 84d87470)
+    add_test_image(lossy_fire lossy/fire.webp 1024x752 3e8c182b)
+    add_test_image(lossy_rose lossy/rose.webp 512x384 1cb94230)
     add_test_image(lossless_rose lossless/rose.webp 512x384 943882e6)
     add_test_image(lossless_tux lossless/tux.webp 386x395 dd77ded2)
     add_test_image(lossless_dice lossless/dice.webp 800x600 f3285d5a)
