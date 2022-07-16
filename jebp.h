@@ -474,10 +474,13 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #define JEBP__ABS(a) ((a) < 0 ? -(a) : (a))
 #define JEBP__CLAMP(x, min, max) JEBP__MIN(JEBP__MAX(x, min), max)
 #define JEBP__CLAMP_UBYTE(x) JEBP__CLAMP(x, 0, 255)
-#define JEBP__AVG(a, b) (((a) + (b)) / 2)
-#define JEBP__ROUND_SHIFT(a, b) (((a) + (1 << ((b)-1))) >> (b))
-#define JEBP__CEIL_SHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
-#define JEBP__CEIL_ALIGN(a, b) (((a) + (b)-1) & ~((b)-1))
+// F=floor, C=ceil, R=round
+#define JEBP__CSHIFT(a, b) (((a) + (1 << (b)) - 1) >> (b))
+#define JEBP__RSHIFT(a, b) (((a) + (1 << ((b)-1))) >> (b))
+#define JEBP__FAVG(a, b) (((a) + (b)) / 2)
+#define JEBP__RAVG(a, b) JEBP__RSHIFT((a) + (b), 1)
+#define JEBP__RAVG3(a, b, c) JEBP__RSHIFT((a) + (b) + (b) + (c), 2)
+#define JEBP__CALIGN(a, b) (((a) + (b)-1) & ~((b)-1))
 #define JEBP__SET_MASK(x, m, v) ((x) = ((x) & ~(m)) | ((v) & (m)))
 #define JEBP__SET_BIT(x, b, v) JEBP__SET_MASK(x, b, (v) ? (b) : 0)
 #define JEBP__CLEAR(ptr, size) memset(ptr, 0, size)
@@ -799,8 +802,9 @@ static jebp_error_t jebp__alloc_yuv_image(jebp__yuv_image_t *image) {
     }
 
     // Setup the actual pointers
-    image->y =
-        (void *)JEBP__CEIL_ALIGN((size_t)image->buffer, JEBP__SIMD_ALIGN);
+    // TODO: maybe move this to a function and use native aligned alloc if
+    //       available
+    image->y = (void *)JEBP__CALIGN((size_t)image->buffer, JEBP__SIMD_ALIGN);
     image->u = image->y + y_size;
     image->v = image->u + uv_size;
     image->y += image->stride + JEBP__SIMD_ALIGN;
@@ -823,7 +827,7 @@ JEBP__INLINE void jebp__upscale_uv_row(jebp_ubyte *out, jebp_ubyte *in,
     jebp_int x = 0;
     for (; x < width - 1; x += 1) {
         out[x * 2] = in[x];
-        out[x * 2 + 1] = JEBP__AVG(in[x], in[x + 1]);
+        out[x * 2 + 1] = JEBP__RAVG(in[x], in[x + 1]);
     }
     out[x * 2] = in[x];
     out[x * 2 + 1] = in[x];
@@ -874,8 +878,8 @@ static jebp_error_t jebp__convert_yuv_image(jebp_image_t *out,
         row = &out->pixels[(y + 1) * out->width];
         y_row = &in->y[(y + 1) * in->stride];
         for (jebp_int x = 0; x < out->width; x += 1) {
-            jebp_ubyte u_avg = JEBP__AVG(u_prev[x], u_next[x]);
-            jebp_ubyte v_avg = JEBP__AVG(v_prev[x], v_next[x]);
+            jebp_ubyte u_avg = JEBP__RAVG(u_prev[x], u_next[x]);
+            jebp_ubyte v_avg = JEBP__RAVG(v_prev[x], v_next[x]);
             row[x].r = JEBP__CONVERT_R(y_row[x], v_avg);
             row[x].g = JEBP__CONVERT_G(y_row[x], u_avg, v_avg);
             row[x].b = JEBP__CONVERT_B(y_row[x], u_avg);
@@ -1453,6 +1457,8 @@ static void jebp__invert_wht(jebp_short *wht) {
  * VP8 prediction
  */
 typedef void (*jebp__vp8_pred_t)(jebp_ubyte *pred, jebp_int stride);
+typedef void (*jebp__b_pred_t)(jebp_ubyte *pred, jebp_int stride,
+                               jebp_ubyte *tr);
 
 static void jebp__uv_pred_fill(jebp_ubyte *pred, jebp_int stride,
                                jebp_ubyte value) {
@@ -1483,20 +1489,20 @@ static jebp_int jebp__uv_pred_sum_t(jebp_ubyte *pred, jebp_int stride) {
 static void jebp__uv_pred_dc(jebp_ubyte *pred, jebp_int stride) {
     jebp_int sum =
         jebp__uv_pred_sum_t(pred, stride) + jebp__uv_pred_sum_l(pred, stride);
-    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 4);
+    jebp_ubyte dc = JEBP__RSHIFT(sum, 4);
     jebp__uv_pred_fill(pred, stride, dc);
 }
 
 // For handling DC prediction on top and left macroblocks
 static void jebp__uv_pred_dc_l(jebp_ubyte *pred, jebp_int stride) {
     jebp_int sum = jebp__uv_pred_sum_l(pred, stride);
-    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 3);
+    jebp_ubyte dc = JEBP__RSHIFT(sum, 3);
     jebp__uv_pred_fill(pred, stride, dc);
 }
 
 static void jebp__uv_pred_dc_t(jebp_ubyte *pred, jebp_int stride) {
     jebp_int sum = jebp__uv_pred_sum_t(pred, stride);
-    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 3);
+    jebp_ubyte dc = JEBP__RSHIFT(sum, 3);
     jebp__uv_pred_fill(pred, stride, dc);
 }
 
@@ -1554,19 +1560,19 @@ static jebp_int jebp__y_pred_sum_t(jebp_ubyte *pred, jebp_int stride) {
 static void jebp__y_pred_dc(jebp_ubyte *pred, jebp_int stride) {
     jebp_int sum =
         jebp__y_pred_sum_t(pred, stride) + jebp__y_pred_sum_l(pred, stride);
-    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 5);
+    jebp_ubyte dc = JEBP__RSHIFT(sum, 5);
     jebp__y_pred_fill(pred, stride, dc);
 }
 
 static void jebp__y_pred_dc_l(jebp_ubyte *pred, jebp_int stride) {
     jebp_int sum = jebp__y_pred_sum_l(pred, stride);
-    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 4);
+    jebp_ubyte dc = JEBP__RSHIFT(sum, 4);
     jebp__y_pred_fill(pred, stride, dc);
 }
 
 static void jebp__y_pred_dc_t(jebp_ubyte *pred, jebp_int stride) {
     jebp_int sum = jebp__y_pred_sum_t(pred, stride);
-    jebp_ubyte dc = JEBP__ROUND_SHIFT(sum, 4);
+    jebp_ubyte dc = JEBP__RSHIFT(sum, 4);
     jebp__y_pred_fill(pred, stride, dc);
 }
 
@@ -1934,8 +1940,8 @@ static jebp_error_t jebp__read_vp8(jebp_image_t *image, jebp__reader_t *reader,
         return err;
     }
 
-    jebp_int macro_width = JEBP__CEIL_SHIFT(image->width, JEBP__Y_PIXEL_BITS);
-    jebp_int macro_height = JEBP__CEIL_SHIFT(image->height, JEBP__Y_PIXEL_BITS);
+    jebp_int macro_width = JEBP__CSHIFT(image->width, JEBP__Y_PIXEL_BITS);
+    jebp_int macro_height = JEBP__CSHIFT(image->height, JEBP__Y_PIXEL_BITS);
     jebp__yuv_image_t yuv_image;
     yuv_image.width = macro_width * JEBP__Y_PIXEL_SIZE;
     yuv_image.height = macro_height * JEBP__Y_PIXEL_SIZE;
@@ -2597,8 +2603,8 @@ static jebp_error_t jebp__read_subimage(jebp__subimage_t *subimage,
                                         jebp_image_t *image) {
     jebp_error_t err = JEBP_OK;
     subimage->block_bits = jebp__read_bits(bits, 3, &err) + 2;
-    subimage->width = JEBP__CEIL_SHIFT(image->width, subimage->block_bits);
-    subimage->height = JEBP__CEIL_SHIFT(image->height, subimage->block_bits);
+    subimage->width = JEBP__CSHIFT(image->width, subimage->block_bits);
+    subimage->height = JEBP__CSHIFT(image->height, subimage->block_bits);
     if (err != JEBP_OK) {
         return err;
     }
@@ -2883,13 +2889,13 @@ static void jebp__vp8l_pred5(jebp_color_t *pixel, jebp_color_t *top,
 #endif
     for (; x < width; x += 1) {
         pixel[x].r +=
-            JEBP__AVG(JEBP__AVG(pixel[x - 1].r, top[x + 1].r), top[x].r);
+            JEBP__FAVG(JEBP__FAVG(pixel[x - 1].r, top[x + 1].r), top[x].r);
         pixel[x].g +=
-            JEBP__AVG(JEBP__AVG(pixel[x - 1].g, top[x + 1].g), top[x].g);
+            JEBP__FAVG(JEBP__FAVG(pixel[x - 1].g, top[x + 1].g), top[x].g);
         pixel[x].b +=
-            JEBP__AVG(JEBP__AVG(pixel[x - 1].b, top[x + 1].b), top[x].b);
+            JEBP__FAVG(JEBP__FAVG(pixel[x - 1].b, top[x + 1].b), top[x].b);
         pixel[x].a +=
-            JEBP__AVG(JEBP__AVG(pixel[x - 1].a, top[x + 1].a), top[x].a);
+            JEBP__FAVG(JEBP__FAVG(pixel[x - 1].a, top[x + 1].a), top[x].a);
     }
 }
 
@@ -2932,10 +2938,10 @@ JEBP__INLINE void jebp__vp8l_pred_avgtl(jebp_color_t *pixel, jebp_color_t *top,
     }
 #endif
     for (; x < width; x += 1) {
-        pixel[x].r += JEBP__AVG(pixel[x - 1].r, top[x].r);
-        pixel[x].g += JEBP__AVG(pixel[x - 1].g, top[x].g);
-        pixel[x].b += JEBP__AVG(pixel[x - 1].b, top[x].b);
-        pixel[x].a += JEBP__AVG(pixel[x - 1].a, top[x].a);
+        pixel[x].r += JEBP__FAVG(pixel[x - 1].r, top[x].r);
+        pixel[x].g += JEBP__FAVG(pixel[x - 1].g, top[x].g);
+        pixel[x].b += JEBP__FAVG(pixel[x - 1].b, top[x].b);
+        pixel[x].a += JEBP__FAVG(pixel[x - 1].a, top[x].a);
     }
 }
 
@@ -2983,10 +2989,10 @@ JEBP__INLINE void jebp__vp8l_pred_avgtr(jebp_color_t *pixel, jebp_color_t *top,
     }
 #endif
     for (; x < width; x += 1) {
-        pixel[x].r += JEBP__AVG(top[x].r, top[x + 1].r);
-        pixel[x].g += JEBP__AVG(top[x].g, top[x + 1].g);
-        pixel[x].b += JEBP__AVG(top[x].b, top[x + 1].b);
-        pixel[x].a += JEBP__AVG(top[x].a, top[x + 1].a);
+        pixel[x].r += JEBP__FAVG(top[x].r, top[x + 1].r);
+        pixel[x].g += JEBP__FAVG(top[x].g, top[x + 1].g);
+        pixel[x].b += JEBP__FAVG(top[x].b, top[x + 1].b);
+        pixel[x].a += JEBP__FAVG(top[x].a, top[x + 1].a);
     }
 }
 
@@ -3060,14 +3066,14 @@ static void jebp__vp8l_pred10(jebp_color_t *pixel, jebp_color_t *top,
     }
 #endif
     for (; x < width; x += 1) {
-        pixel[x].r += JEBP__AVG(JEBP__AVG(pixel[x - 1].r, top[x - 1].r),
-                                JEBP__AVG(top[x].r, top[x + 1].r));
-        pixel[x].g += JEBP__AVG(JEBP__AVG(pixel[x - 1].g, top[x - 1].g),
-                                JEBP__AVG(top[x].g, top[x + 1].g));
-        pixel[x].b += JEBP__AVG(JEBP__AVG(pixel[x - 1].b, top[x - 1].b),
-                                JEBP__AVG(top[x].b, top[x + 1].b));
-        pixel[x].a += JEBP__AVG(JEBP__AVG(pixel[x - 1].a, top[x - 1].a),
-                                JEBP__AVG(top[x].a, top[x + 1].a));
+        pixel[x].r += JEBP__FAVG(JEBP__FAVG(pixel[x - 1].r, top[x - 1].r),
+                                 JEBP__FAVG(top[x].r, top[x + 1].r));
+        pixel[x].g += JEBP__FAVG(JEBP__FAVG(pixel[x - 1].g, top[x - 1].g),
+                                 JEBP__FAVG(top[x].g, top[x + 1].g));
+        pixel[x].b += JEBP__FAVG(JEBP__FAVG(pixel[x - 1].b, top[x - 1].b),
+                                 JEBP__FAVG(top[x].b, top[x + 1].b));
+        pixel[x].a += JEBP__FAVG(JEBP__FAVG(pixel[x - 1].a, top[x - 1].a),
+                                 JEBP__FAVG(top[x].a, top[x + 1].a));
     }
 }
 
@@ -3300,10 +3306,10 @@ static void jebp__vp8l_pred13(jebp_color_t *pixel, jebp_color_t *top,
     }
 #endif
     for (; x < width; x += 1) {
-        jebp_color_t avg = {JEBP__AVG(pixel[x - 1].r, top[x].r),
-                            JEBP__AVG(pixel[x - 1].g, top[x].g),
-                            JEBP__AVG(pixel[x - 1].b, top[x].b),
-                            JEBP__AVG(pixel[x - 1].a, top[x].a)};
+        jebp_color_t avg = {JEBP__FAVG(pixel[x - 1].r, top[x].r),
+                            JEBP__FAVG(pixel[x - 1].g, top[x].g),
+                            JEBP__FAVG(pixel[x - 1].b, top[x].b),
+                            JEBP__FAVG(pixel[x - 1].a, top[x].a)};
         pixel[x].r += JEBP__CLAMP_UBYTE(avg.r + (avg.r - top[x - 1].r) / 2);
         pixel[x].g += JEBP__CLAMP_UBYTE(avg.g + (avg.g - top[x - 1].g) / 2);
         pixel[x].b += JEBP__CLAMP_UBYTE(avg.b + (avg.b - top[x - 1].b) / 2);
