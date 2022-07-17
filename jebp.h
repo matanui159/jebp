@@ -1713,10 +1713,10 @@ static void jebp__b_pred_tm(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
     uint8x16_t v_add = vqaddq_u8(v_left, v_diff);
     uint8x16_t v_sub = vqsubq_u8(v_left, v_diff);
     uint32x4_t v_row = vreinterpretq_u32_u8(vbslq_u8(v_neg, v_sub, v_add));
-    vst1q_lane_u32(&pred[0 * stride], v_row, 0);
-    vst1q_lane_u32(&pred[1 * stride], v_row, 1);
-    vst1q_lane_u32(&pred[2 * stride], v_row, 2);
-    vst1q_lane_u32(&pred[3 * stride], v_row, 3);
+    vst1q_lane_u32((uint32_t *)&pred[0 * stride], v_row, 0);
+    vst1q_lane_u32((uint32_t *)&pred[1 * stride], v_row, 1);
+    vst1q_lane_u32((uint32_t *)&pred[2 * stride], v_row, 2);
+    vst1q_lane_u32((uint32_t *)&pred[3 * stride], v_row, 3);
 #else
     for (jebp_int y = 0; y < JEBP__BLOCK_SIZE; y += 1) {
         jebp_ubyte *row = &pred[y * stride];
