@@ -1402,7 +1402,7 @@ static jebp_error_t jebp__read_macro_header(jebp__macro_header_t *hdr,
 // Utility macros that does 16-bit fixed-point multiplications
 // Multiplies against cos(pi/8)*sqrt(2)
 #define JEBP__DCT_COS(x) ((x) + (((x)*20091) >> 16))
-// Multiplies against cos(pi/8)*sqrt(2)
+// Multiplies against sin(pi/8)*sqrt(2)
 #define JEBP__DCT_SIN(x) (((x)*35468) >> 16)
 
 static void jebp__invert_dct(jebp_short *dct) {
@@ -1423,10 +1423,10 @@ static void jebp__invert_dct(jebp_short *dct) {
         jebp_int t1 = row[0] - row[2];
         jebp_int t2 = JEBP__DCT_SIN(row[1]) - JEBP__DCT_COS(row[3]);
         jebp_int t3 = JEBP__DCT_COS(row[1]) + JEBP__DCT_SIN(row[3]);
-        row[0] = (t0 + t3 + 4) >> 3;
-        row[1] = (t1 + t2 + 4) >> 3;
-        row[2] = (t1 - t2 + 4) >> 3;
-        row[3] = (t0 - t3 + 4) >> 3;
+        row[0] = JEBP__RSHIFT(t0 + t3, 3);
+        row[1] = JEBP__RSHIFT(t1 + t2, 3);
+        row[2] = JEBP__RSHIFT(t1 - t2, 3);
+        row[3] = JEBP__RSHIFT(t0 - t3, 3);
     }
 }
 
@@ -1448,6 +1448,7 @@ static void jebp__invert_wht(jebp_short *wht) {
         jebp_int t1 = row[1] + row[2];
         jebp_int t2 = row[1] - row[2];
         jebp_int t3 = row[0] - row[3];
+        // These use a different rounding value and thus can't use RSHIFT
         row[0] = (t0 + t1 + 3) >> 3;
         row[1] = (t2 + t3 + 3) >> 3;
         row[2] = (t0 - t1 + 3) >> 3;
@@ -1482,12 +1483,24 @@ static jebp_int jebp__uv_pred_sum_l(jebp_ubyte *pred, jebp_int stride) {
 }
 
 static jebp_int jebp__uv_pred_sum_t(jebp_ubyte *pred, jebp_int stride) {
-    jebp_int sum = 0;
     jebp_ubyte *top = &pred[-stride];
+#if defined(JEBP__SIMD_NEON)
+    uint8x8_t v_top = vld1_u8(top);
+#ifdef JEBP__SIMD_NEON64
+    return vaddlv_u8(v_top);
+#else  // JEBP__SIMD_NEON64
+    uint16x4_t v_top4 = vpaddl_u8(v_top);
+    uint16x4_t v_top2 = vpadd_u16(v_top4, v_top4);
+    uint16x4_t v_top1 = vpadd_u16(v_top2, v_top2);
+    return vget_lane_u16(v_top1, 0);
+#endif // JEBP__SIMD_NEON64
+#else
+    jebp_int sum = 0;
     for (jebp_int i = 0; i < JEBP__UV_PIXEL_SIZE; i += 1) {
         sum += top[i];
     }
     return sum;
+#endif
 }
 
 static void jebp__uv_pred_dc(jebp_ubyte *pred, jebp_int stride) {
@@ -1512,16 +1525,39 @@ static void jebp__uv_pred_dc_t(jebp_ubyte *pred, jebp_int stride) {
 
 static void jebp__uv_pred_tm(jebp_ubyte *pred, jebp_int stride) {
     jebp_ubyte *top = &pred[-stride];
+#if defined(JEBP__SIMD_NEON)
+    uint8x8_t v_toplo = vld1_u8(top);
+    uint8x16_t v_top = vcombine_u8(v_toplo, v_toplo);
+    uint8x16_t v_tl = vld1q_dup_u8(&top[-1]);
+    uint8x16_t v_diff = vabdq_u8(v_top, v_tl);
+    uint8x16_t v_neg = vcltq_u8(v_top, v_tl);
+    for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 2) {
+        jebp_ubyte *rowlo = &pred[(y + 0) * stride];
+        jebp_ubyte *rowhi = &pred[(y + 1) * stride];
+        uint8x16_t v_left =
+            vcombine_u8(vld1_dup_u8(&rowlo[-1]), vld1_dup_u8(&rowhi[-1]));
+        uint8x16_t v_add = vqaddq_u8(v_left, v_diff);
+        uint8x16_t v_sub = vqsubq_u8(v_left, v_diff);
+        uint8x16_t v_row = vbslq_u8(v_neg, v_sub, v_add);
+        vst1_u8(rowlo, vget_low_u8(v_row));
+        vst1_u8(rowhi, vget_high_u8(v_row));
+    }
+#else
     for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 1) {
         jebp_ubyte *row = &pred[y * stride];
+        jebp_int diff = row[-1] - top[-1];
         for (jebp_int x = 0; x < JEBP__UV_PIXEL_SIZE; x += 1) {
-            row[x] = JEBP__CLAMP_UBYTE(row[-1] + top[x] - top[-1]);
+            row[x] = JEBP__CLAMP_UBYTE(diff + top[x]);
         }
     }
+#endif
 }
 
 static void jebp__uv_pred_v(jebp_ubyte *pred, jebp_int stride) {
-    jebp_ubyte *top = &pred[-stride];
+    // This might look dumb but on most compilers this prevents repetive loads
+    // TODO: msvc compiling for ARM still struggles with this but eh
+    jebp_ubyte top[JEBP__UV_PIXEL_SIZE];
+    memcpy(top, &pred[-stride], JEBP__UV_PIXEL_SIZE);
     for (jebp_int y = 0; y < JEBP__UV_PIXEL_SIZE; y += 1) {
         jebp_ubyte *row = &pred[y * stride];
         memcpy(row, top, JEBP__UV_PIXEL_SIZE);
@@ -1555,12 +1591,25 @@ static jebp_int jebp__y_pred_sum_l(jebp_ubyte *pred, jebp_int stride) {
 }
 
 static jebp_int jebp__y_pred_sum_t(jebp_ubyte *pred, jebp_int stride) {
-    jebp_int sum = 0;
     jebp_ubyte *top = &pred[-stride];
+#if defined(JEBP__SIMD_NEON)
+    uint8x16_t v_top = vld1q_u8(top);
+#ifdef JEBP__SIMD_NEON64
+    return vaddlvq_u8(v_top);
+#else  // JEBP__SIMD_NEON64
+    uint16x8_t v_top8 = vaddl_u8(vget_low_u8(v_top), vget_high_u8(v_top));
+    uint16x4_t v_top4 = vadd_u16(vget_low_u16(v_top8), vget_high_u16(v_top8));
+    uint16x4_t v_top2 = vpadd_u16(v_top4, v_top4);
+    uint16x4_t v_top1 = vpadd_u16(v_top2, v_top2);
+    return vget_lane_u16(v_top1, 0);
+#endif // JEBP__SIMD_NEON64
+#else
+    jebp_int sum = 0;
     for (jebp_int i = 0; i < JEBP__Y_PIXEL_SIZE; i += 1) {
         sum += top[i];
     }
     return sum;
+#endif
 }
 
 static void jebp__y_pred_dc(jebp_ubyte *pred, jebp_int stride) {
@@ -1584,16 +1633,33 @@ static void jebp__y_pred_dc_t(jebp_ubyte *pred, jebp_int stride) {
 
 static void jebp__y_pred_tm(jebp_ubyte *pred, jebp_int stride) {
     jebp_ubyte *top = &pred[-stride];
+#if defined(JEBP__SIMD_NEON)
+    uint8x16_t v_top = vld1q_u8(top);
+    uint8x16_t v_tl = vld1q_dup_u8(&top[-1]);
+    uint8x16_t v_diff = vabdq_u8(v_top, v_tl);
+    uint8x16_t v_neg = vcltq_u8(v_top, v_tl);
     for (jebp_int y = 0; y < JEBP__Y_PIXEL_SIZE; y += 1) {
         jebp_ubyte *row = &pred[y * stride];
+        uint8x16_t v_left = vld1q_dup_u8(&row[-1]);
+        uint8x16_t v_add = vqaddq_u8(v_left, v_diff);
+        uint8x16_t v_sub = vqsubq_u8(v_left, v_diff);
+        uint8x16_t v_row = vbslq_u8(v_neg, v_sub, v_add);
+        vst1q_u8(row, v_row);
+    }
+#else
+    for (jebp_int y = 0; y < JEBP__Y_PIXEL_SIZE; y += 1) {
+        jebp_ubyte *row = &pred[y * stride];
+        jebp_int diff = row[-1] - top[-1];
         for (jebp_int x = 0; x < JEBP__Y_PIXEL_SIZE; x += 1) {
-            row[x] = JEBP__CLAMP_UBYTE(row[-1] + top[x] - top[-1]);
+            row[x] = JEBP__CLAMP_UBYTE(diff + top[x]);
         }
     }
+#endif
 }
 
 static void jebp__y_pred_v(jebp_ubyte *pred, jebp_int stride) {
-    jebp_ubyte *top = &pred[-stride];
+    jebp_ubyte top[JEBP__Y_PIXEL_SIZE];
+    memcpy(top, &pred[-stride], JEBP__Y_PIXEL_SIZE);
     for (jebp_int y = 0; y < JEBP__Y_PIXEL_SIZE; y += 1) {
         jebp_ubyte *row = &pred[y * stride];
         memcpy(row, top, JEBP__Y_PIXEL_SIZE);
@@ -1632,13 +1698,35 @@ static void jebp__b_pred_dc(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
 static void jebp__b_pred_tm(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
     (void)tr;
     jebp_ubyte *top = &pred[-stride];
+#if defined(JEBP__SIMD_NEON)
+    uint8x16_t v_top = vreinterpretq_u8_u32(vld1q_dup_u32((uint32_t *)top));
+    uint8x16_t v_tl = vld1q_dup_u8(&top[-1]);
+    uint8x16_t v_diff = vabdq_u8(v_top, v_tl);
+    uint8x16_t v_neg = vcltq_u8(v_top, v_tl);
+    uint8x16_t v_left = vdupq_n_u8(0);
+    v_left = vld1q_lane_u8(&pred[0 * stride - 1], v_left, 0);
+    v_left = vld1q_lane_u8(&pred[1 * stride - 1], v_left, 4);
+    v_left = vld1q_lane_u8(&pred[2 * stride - 1], v_left, 8);
+    v_left = vld1q_lane_u8(&pred[3 * stride - 1], v_left, 12);
+    v_left = vreinterpretq_u8_u32(
+        vmulq_n_u32(vreinterpretq_u32_u8(v_left), 0x01010101));
+    uint8x16_t v_add = vqaddq_u8(v_left, v_diff);
+    uint8x16_t v_sub = vqsubq_u8(v_left, v_diff);
+    uint32x4_t v_row = vreinterpretq_u32_u8(vbslq_u8(v_neg, v_sub, v_add));
+    vst1q_lane_u32(&pred[0 * stride], v_row, 0);
+    vst1q_lane_u32(&pred[1 * stride], v_row, 1);
+    vst1q_lane_u32(&pred[2 * stride], v_row, 2);
+    vst1q_lane_u32(&pred[3 * stride], v_row, 3);
+#else
     for (jebp_int y = 0; y < JEBP__BLOCK_SIZE; y += 1) {
         jebp_ubyte *row = &pred[y * stride];
-        row[0] = JEBP__CLAMP_UBYTE(row[-1] + top[0] - top[-1]);
-        row[1] = JEBP__CLAMP_UBYTE(row[-1] + top[1] - top[-1]);
-        row[2] = JEBP__CLAMP_UBYTE(row[-1] + top[2] - top[-1]);
-        row[3] = JEBP__CLAMP_UBYTE(row[-1] + top[3] - top[-1]);
+        jebp_int diff = row[-1] - top[-1];
+        row[0] = JEBP__CLAMP_UBYTE(diff + top[0]);
+        row[1] = JEBP__CLAMP_UBYTE(diff + top[1]);
+        row[2] = JEBP__CLAMP_UBYTE(diff + top[2]);
+        row[3] = JEBP__CLAMP_UBYTE(diff + top[3]);
     }
+#endif
 }
 
 static void jebp__b_pred_ve(jebp_ubyte *pred, jebp_int stride, jebp_ubyte *tr) {
