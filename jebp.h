@@ -387,6 +387,13 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #define JEBP__ALWAYS_INLINE
 #endif
 #define JEBP__INLINE static inline JEBP__ALWAYS_INLINE
+#if JEBP__HAS_ATTRIBUTE(aligned)
+#define JEBP__ALIGN_TYPE(type, align) type __attribute__((aligned(align)))
+#elif defined(_MSC_VER)
+#define JEBP__ALIGN_TYPE(type, align) __declspec(align(align)) type
+#else
+#define JEBP__ALIGN_TYPE(type, align) type
+#endif
 
 #ifdef __has_builtin
 #define JEBP__HAS_BUILTIN __has_builtin
@@ -1405,7 +1412,93 @@ static jebp_error_t jebp__read_macro_header(jebp__macro_header_t *hdr,
 // Multiplies against sin(pi/8)*sqrt(2)
 #define JEBP__DCT_SIN(x) (((x)*35468) >> 16)
 
+#if defined(JEBP__SIMD_NEON)
+JEBP__INLINE int16x8_t jebp__neon_getlo_s16x8(int16x8_t v1, int16x8_t v2) {
+#ifdef JEBP__SIMD_NEON64
+    int64x2_t v_lo =
+        vuzp1q_s64(vreinterpretq_s64_s16(v1), vreinterpretq_s64_s16(v2));
+    return vreinterpretq_s16_s64(v_lo);
+#else  // JEBP__SIMD_NEON64
+    return vcombine_s16(vget_low_s16(v1), vget_low_s16(v2));
+#endif // JEBP__SIMD_NEON64
+}
+
+JEBP__INLINE int16x8_t jebp__neon_gethi_s16x8(int16x8_t v1, int16x8_t v2) {
+#ifdef JEBP__SIMD_NEON64
+    int64x2_t v_hi =
+        vuzp2q_s64(vreinterpretq_s64_s16(v1), vreinterpretq_s64_s16(v2));
+    return vreinterpretq_s16_s64(v_hi);
+#else  // JEBP__SIMD_NEON64
+    return vcombine_s16(vget_high_s16(v1), vget_high_s16(v2));
+#endif // JEBP__SIMD_NEON64
+}
+
+JEBP__INLINE int16x8_t jebp__neon_dctcos_s16x8(int16x8_t v_dct) {
+    int16x8_t v_cos = vqdmulhq_n_s16(v_dct, 20091);
+    return vsraq_n_s16(v_dct, v_cos, 1);
+}
+
+JEBP__INLINE int16x8_t jebp__neon_dctsin_s16x8(int16x8_t v_dct) {
+    return vqdmulhq_n_s16(v_dct, 17734);
+}
+#endif
+
 static void jebp__invert_dct(jebp_short *dct) {
+#if defined(JEBP__SIMD_NEON)
+    int16x8_t v_sign = vcombine_s16(vdup_n_s16(1), vdup_n_s16(-1));
+    int16x4x4_t v_dct4;
+#ifdef JEBP__SIMD_NEON64
+    int64x2x2_t v_dct64 = vld2q_s64((int64_t *)dct);
+    int16x8_t v_dct0 = vreinterpretq_s16_s64(v_dct64.val[0]);
+    int16x8_t v_dct1 = vreinterpretq_s16_s64(v_dct64.val[1]);
+#ifndef JEBP__LITTLE_ENDIAN
+    v_dct0 = vrev64q_s16(v_dct0);
+    v_dct1 = vrev64q_s16(v_dct1);
+#endif // JEBP__LITTLE_ENDIAN
+#else  // JEBP__SIMD_NEON64
+    v_dct4 = vld1_s16_x4(dct);
+    int16x8_t v_dct0 = vcombine_s16(v_dct4.val[0], v_dct4.val[2]);
+    int16x8_t v_dct1 = vcombine_s16(v_dct4.val[1], v_dct4.val[3]);
+#endif // JEBP__SIMD_NEON64
+    // Vertical pass
+    int16x8_t v_lo = jebp__neon_getlo_s16x8(v_dct0, v_dct0);
+    int16x8_t v_hi = jebp__neon_gethi_s16x8(v_dct0, v_dct0);
+    int16x8_t v_t01 = vmlaq_s16(v_lo, v_hi, v_sign);
+    int16x8_t v_cos = jebp__neon_dctcos_s16x8(v_dct1);
+    int16x8_t v_sin = jebp__neon_dctsin_s16x8(v_dct1);
+    v_lo = jebp__neon_getlo_s16x8(v_cos, v_sin);
+    v_hi = jebp__neon_gethi_s16x8(v_sin, v_cos);
+    int16x8_t v_t32 = vmlaq_s16(v_lo, v_hi, v_sign);
+    v_dct0 = vaddq_s16(v_t01, v_t32);
+    v_dct1 = vsubq_s16(v_t01, v_t32);
+    v_dct1 = vextq_s16(v_dct1, v_dct1, 4);
+    // Horizontal pass
+    int16x8x2_t v_dct = vuzpq_s16(v_dct0, v_dct1);
+    int16x8x2_t v_evod = vuzpq_s16(v_dct.val[0], v_dct.val[0]);
+    v_t01 = vmlaq_s16(v_evod.val[0], v_evod.val[1], v_sign);
+    v_cos = jebp__neon_dctcos_s16x8(v_dct.val[1]);
+    v_sin = jebp__neon_dctsin_s16x8(v_dct.val[1]);
+#ifdef JEBP__SIMD_NEON64
+    int16x8_t v_even = vuzp1q_s16(v_cos, v_sin);
+    int16x8_t v_odd = vuzp2q_s16(v_sin, v_cos);
+#else  // JEBP__SIMD_NEON64
+    v_evod = vuzpq_s16(v_cos, v_sin);
+    int16x8_t v_even = v_evod.val[0];
+    int16x8_t v_odd = vextq_s16(v_evod.val[1], v_evod.val[1], 4);
+#endif // JEBP__SIMD_NEON64
+    v_t32 = vmlaq_s16(v_even, v_odd, v_sign);
+    v_dct0 = vaddq_s16(v_t01, v_t32);
+    v_dct1 = vsubq_s16(v_t01, v_t32);
+    // Rounding and store
+    v_dct0 = vrshrq_n_s16(v_dct0, 3);
+    v_dct1 = vrshrq_n_s16(v_dct1, 3);
+    v_dct4.val[0] = vget_low_s16(v_dct0);
+    v_dct4.val[1] = vget_high_s16(v_dct0);
+    // Saves a vext call by rotating it here
+    v_dct4.val[2] = vget_high_s16(v_dct1);
+    v_dct4.val[3] = vget_low_s16(v_dct1);
+    vst4_s16(dct, v_dct4);
+#else
     for (jebp_int i = 0; i < JEBP__BLOCK_SIZE; i += 1) {
         jebp_short *col = &dct[i];
         jebp_int t0 = col[0] + col[8];
@@ -1428,9 +1521,43 @@ static void jebp__invert_dct(jebp_short *dct) {
         row[2] = JEBP__RSHIFT(t1 - t2, 3);
         row[3] = JEBP__RSHIFT(t0 - t3, 3);
     }
+#endif
 }
 
 static void jebp__invert_wht(jebp_short *wht) {
+#if defined(JEBP__SIMD_NEON)
+    int16x8_t v_round = vdupq_n_s16(3);
+    int16x8x2_t v_wht = vld1q_s16_x2(wht);
+    // Vertical pass
+    int16x8_t v_wht0 = v_wht.val[0];
+    int16x8_t v_wht1 = vextq_s16(v_wht.val[1], v_wht.val[1], 4);
+    int16x8_t v_t01 = vaddq_s16(v_wht0, v_wht1);
+    int16x8_t v_t32 = vsubq_s16(v_wht0, v_wht1);
+    int16x8_t v_t03 = jebp__neon_getlo_s16x8(v_t01, v_t32);
+    int16x8_t v_t12 = jebp__neon_gethi_s16x8(v_t01, v_t32);
+    int32x4_t v_wht0_32 = vreinterpretq_s32_s16(vaddq_s16(v_t03, v_t12));
+    int32x4_t v_wht1_32 = vreinterpretq_s32_s16(vsubq_s16(v_t03, v_t12));
+    // Horizontal pass
+    int32x4x2_t v_wht32 = vuzpq_s32(v_wht0_32, v_wht1_32);
+    v_wht0 = vreinterpretq_s16_s32(v_wht32.val[0]);
+    v_wht1 = vrev32q_s16(vreinterpretq_s16_s32(v_wht32.val[1]));
+    v_t01 = vaddq_s16(v_wht0, v_wht1);
+    v_t32 = vsubq_s16(v_wht0, v_wht1);
+    int16x8x2_t v_tmp = vuzpq_s16(v_t01, v_t32);
+    v_wht0 = vaddq_s16(v_tmp.val[0], v_tmp.val[1]);
+    v_wht1 = vsubq_s16(v_tmp.val[0], v_tmp.val[1]);
+    // Rounding and store
+    v_wht0 = vaddq_s16(v_wht0, v_round);
+    v_wht1 = vaddq_s16(v_wht1, v_round);
+    v_wht0 = vshrq_n_s16(v_wht0, 3);
+    v_wht1 = vshrq_n_s16(v_wht1, 3);
+    int16x4x4_t v_wht4;
+    v_wht4.val[0] = vget_low_s16(v_wht0);
+    v_wht4.val[1] = vget_high_s16(v_wht0);
+    v_wht4.val[2] = vget_low_s16(v_wht1);
+    v_wht4.val[3] = vget_high_s16(v_wht1);
+    vst4_s16(wht, v_wht4);
+#else
     for (jebp_int i = 0; i < JEBP__BLOCK_SIZE; i += 1) {
         jebp_short *col = &wht[i];
         jebp_int t0 = col[0] + col[12];
@@ -1454,6 +1581,7 @@ static void jebp__invert_wht(jebp_short *wht) {
         row[2] = (t0 - t1 + 3) >> 3;
         row[3] = (t3 - t2 + 3) >> 3;
     }
+#endif
 }
 
 /**
@@ -1936,13 +2064,13 @@ static jebp_int jebp__read_dct(jebp__macro_header_t *hdr, jebp_short *dct,
     jebp_short *dcac;
     switch (type) {
     case JEBP__BLOCK_Y2:
-        dcac = (jebp_short *)&quants->y2_dc;
+        dcac = &quants->y2_dc;
         break;
     case JEBP__BLOCK_UV:
-        dcac = (jebp_short *)&quants->uv_dc;
+        dcac = &quants->uv_dc;
         break;
     default:
-        dcac = (jebp_short *)&quants->y_dc;
+        dcac = &quants->y_dc;
         break;
     }
     // The initial quantizer is DC if starting at 0, or AC for Y1 blocks
@@ -2029,8 +2157,8 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
                                           jebp__yuv_image_t *image,
                                           jebp__bec_reader_t *bec) {
     jebp_error_t err = JEBP_OK;
-    jebp_short dct[JEBP__NB_BLOCK_COEFFS];
-    jebp_short wht[JEBP__NB_BLOCK_COEFFS];
+    JEBP__ALIGN_TYPE(jebp_short dct[JEBP__NB_BLOCK_COEFFS], JEBP__SIMD_ALIGN);
+    JEBP__ALIGN_TYPE(jebp_short wht[JEBP__NB_BLOCK_COEFFS], JEBP__SIMD_ALIGN);
     jebp__block_type_t y_type = JEBP__BLOCK_Y0;
     jebp_ubyte *image_y =
         &image->y[(hdr->y * image->stride + hdr->x) * JEBP__Y_PIXEL_SIZE];
@@ -2977,12 +3105,12 @@ JEBP__INLINE uint8x16_t jebp__neon_flatten_px4(uint8x16x4_t v_pixel4) {
                                      vcreate_u8(0x3f3e3d3c2b2a2928));
     return vqtbl4q_u8(v_pixel4, v_table);
 #else  // JEBP__SIMD_NEON64
-    uint8x16_t v_mask1 =
-        vcombine_u8(vcreate_u8((uint32_t)-1), vcreate_u8((uint32_t)-1));
-    uint8x16_t v_mask2 = vcombine_u8(vcreate_u8((uint64_t)-1), vcreate_u8(0));
-    uint8x16_t v_pixello = vbslq_u8(v_mask1, v_pixel4.val[0], v_pixel4.val[1]);
-    uint8x16_t v_pixelhi = vbslq_u8(v_mask1, v_pixel4.val[2], v_pixel4.val[3]);
-    return vbslq_u8(v_mask2, v_pixello, v_pixelhi);
+    uint8x16_t v_mask = vreinterpretq_u8_u64(vdupq_n_u64(0xffffffff));
+    uint8x16_t v_even = vcombine_u8(vget_low_u8(v_pixel4.val[0]),
+                                    vget_high_u8(v_pixel4.val[2]));
+    uint8x16_t v_odd = vcombine_u8(vget_low_u8(v_pixel4.val[1]),
+                                   vget_high_u8(v_pixel4.val[3]));
+    return vbslq_u8(v_mask, v_even, v_odd);
 #endif // JEBP__SIMD_NEON64
 }
 
