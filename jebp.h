@@ -390,7 +390,7 @@ jebp_error_t jebp_read(jebp_image_t *image, const char *path);
 #if JEBP__HAS_ATTRIBUTE(aligned)
 #define JEBP__ALIGN_TYPE(type, align) type __attribute__((aligned(align)))
 #elif defined(_MSC_VER)
-#define JEBP__ALIGN_TYPE(type, align) __declspec(align(align)) type
+#define JEBP__ALIGN_TYPE(type, aligned) __declspec(align(aligned)) type
 #else
 #define JEBP__ALIGN_TYPE(type, align) type
 #endif
