@@ -6,6 +6,9 @@
             "id": "image",
             "type": "pickString",
             "options": [
+                "lossy/tree.webp",
+                "lossy/fire.webp",
+                "lossy/rose.webp",
                 "lossless/rose.webp",
                 "lossless/tux.webp",
                 "lossless/dice.webp",

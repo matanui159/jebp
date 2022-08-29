@@ -14,6 +14,7 @@ option(JEBP_WERROR "Treat warnings as errors" ${jebp_release})
 option(JEBP_SANITIZE "Enable sanitizers" ${jebp_debug})
 option(JEBP_STDIO "Enable I/O support" ON)
 option(JEBP_SIMD "Enable SIMD optimizations" ON)
+option(JEBP_VP8 "Enable VP8 support" ON)
 option(JEBP_VP8L "Enable VP8L support" ON)
 
 # Utility functions
@@ -70,6 +71,9 @@ if(NOT JEBP_SIMD)
 endif()
 if(NOT JEBP_VP8L)
     add_compile_definitions(JEBP_NO_VP8L)
+endif()
+if(NOT JEBP_VP8)
+    add_compile_definitions(JEBP_NO_VP8)
 endif()
 
 # Demo program
