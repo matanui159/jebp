@@ -2140,8 +2140,25 @@ static jebp_int jebp__read_dct(jebp__macro_header_t *hdr, jebp_short *dct,
     return 1;
 }
 
+// TODO: invert and add DCT at the same time
 static void jebp__sum_pred_dct(jebp_ubyte *pred, jebp_int stride,
                                jebp_short *dct) {
+#if defined(JEBP__SIMD_NEON)
+    uint16x8x2_t v_dct = vld1q_u16_x2((uint16_t *)dct);
+    uint32x2_t v_pred32 = vcreate_u32(0);
+    for (jebp_int y = 0; y < JEBP__BLOCK_SIZE; y += 2) {
+        uint32_t *rowlo = (uint32_t *)&pred[(y + 0) * stride];
+        uint32_t *rowhi = (uint32_t *)&pred[(y + 1) * stride];
+        v_pred32 = vld1_lane_u32(rowlo, v_pred32, 0);
+        v_pred32 = vld1_lane_u32(rowhi, v_pred32, 1);
+        uint16x8_t v_pred16 =
+            vaddw_u8(v_dct.val[y / 2], vreinterpret_u8_u32(v_pred32));
+        uint8x8_t v_pred8 = vqmovun_s16(vreinterpretq_s16_u16(v_pred16));
+        v_pred32 = vreinterpret_u8_u32(v_pred8);
+        vst1_lane_u32(rowlo, v_pred32, 0);
+        vst1_lane_u32(rowhi, v_pred32, 1);
+    }
+#else
     for (jebp_int i = 0; i < JEBP__BLOCK_SIZE; i += 1) {
         pred[0] = JEBP__CLAMP_UBYTE(pred[0] + dct[0]);
         pred[1] = JEBP__CLAMP_UBYTE(pred[1] + dct[1]);
@@ -2150,6 +2167,7 @@ static void jebp__sum_pred_dct(jebp_ubyte *pred, jebp_int stride,
         pred += stride;
         dct += JEBP__BLOCK_SIZE;
     }
+#endif
 }
 
 static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
@@ -2163,6 +2181,7 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
     jebp_ubyte *image_y =
         &image->y[(hdr->y * image->stride + hdr->x) * JEBP__Y_PIXEL_SIZE];
 
+    // TODO: optimize 16x DCT inversion/add for non-B predictions
     if (hdr->y_pred != JEBP__VP8_PRED_B) {
         y_type = JEBP__BLOCK_Y1;
         jebp__y_preds[jebp__vp8_pred_type(hdr, hdr->y_pred)](image_y,
@@ -2226,6 +2245,7 @@ static jebp_error_t jebp__read_macro_data(jebp__macro_header_t *hdr,
     jebp_ubyte *image_v = &image->v[uv_offset];
     uv_pred(image_v, image->uv_stride);
 
+    // TODO: optimize 4x DCT inversion/add for UV predictions
     for (jebp_int y = 0; y < JEBP__UV_SIZE; y += 1) {
         jebp_int row = y * image->uv_stride;
         for (jebp_int x = 0; x < JEBP__UV_SIZE; x += 1) {
